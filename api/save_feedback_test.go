@@ -33,7 +33,7 @@ func TestCommittedSaveIsSuccessfulWhenRefreshFails(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/api/save", strings.NewReader(form.Encode()))
 	c.Request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	(&ApiService{}).Save(c, "tester")
+	(&ApiService{}).Save(c, "tester", false)
 	var msg Msg
 	if err := json.Unmarshal(w.Body.Bytes(), &msg); err != nil {
 		t.Fatal(err)
