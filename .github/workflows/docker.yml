@@ -98,7 +98,7 @@ jobs:
 
       - name: Restore Cronet cross toolchain
         if: matrix.cross
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/cronet-go/naiveproxy/src/third_party/llvm-build/
@@ -150,7 +150,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
       - name: Cache Docker layers
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: /tmp/.buildx-cache
           key: ${{ runner.os }}-buildx-${{ matrix.platform }}-${{ github.sha }}
