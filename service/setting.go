@@ -383,8 +383,13 @@ func (s *SettingService) GetFinalSubURI(host string) (string, error) {
 		host = (*allSetting)["subDomain"]
 	}
 	port := ":" + (*allSetting)["subPort"]
-	if (port == "80" && protocol == "http") || (port == "443" && protocol == "https") {
+	if (port == ":80" && protocol == "http") || (port == ":443" && protocol == "https") {
 		port = ""
+	}
+	// auto-https (ported from shenaba/2s-ui): behind the generated nginx proxy
+	// the public URL is https on 443, not the internal plaintext port.
+	if acmeSupported() && parseLooseBool((*allSetting)["subNginx"]) {
+		protocol, port = "https", ""
 	}
 	return protocol + "://" + host + port + (*allSetting)["subPath"], nil
 }
