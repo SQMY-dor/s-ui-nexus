@@ -179,25 +179,25 @@ func (s *Server) Start() (err error) {
 	if err != nil {
 		return err
 	}
-	if certFile != "" || keyFile != "" {
-		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	// auto-https (ported from shenaba/2s-ui): certificates are served through a
+	// hot-reloading tls.Config, so a renewal or an applied certificate takes
+	// effect without restarting; behind the generated nginx proxy the server
+	// runs plaintext and nginx terminates TLS.
+	network.ReleaseTLS("web")
+	scheme := "http"
+	if s.settingService.WebBehindProxy() {
+		scheme = "http (behind nginx)"
+	} else if certFile != "" || keyFile != "" {
+		c, err := network.NewTLSConfig("web", certFile, keyFile)
 		if err != nil {
 			listener.Close()
 			return err
 		}
-		c := &tls.Config{
-			Certificates: []tls.Certificate{cert},
-			MinVersion:   tls.VersionTLS12,
-		}
 		listener = network.NewAutoHttpsListener(listener)
 		listener = tls.NewListener(listener, c)
+		scheme = "https"
 	}
-
-	if certFile != "" || keyFile != "" {
-		logger.Info("web server run https on", listener.Addr())
-	} else {
-		logger.Info("web server run http on", listener.Addr())
-	}
+	logger.Info("web server run ", scheme, " on ", listener.Addr())
 	s.listener = listener
 
 	s.httpServer = &http.Server{
@@ -217,6 +217,7 @@ func (s *Server) Start() (err error) {
 }
 
 func (s *Server) Stop() error {
+	network.ReleaseTLS("web")
 	var err error
 	if s.httpServer != nil {
 		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 30*time.Second)
