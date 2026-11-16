@@ -27,9 +27,9 @@ import (
 // 证书申请统一走系统 acme.sh,证书装到与 s-ui.sh 脚本一致的 /root/cert/{域名}/,
 // 便于脚本 / nginx / sing-box 按固定文件名(fullchain.pem / privkey.pem)复用。
 const (
-	acmeIssueTO   = 180 * time.Second   // 申请/安装超时
-	acmeInstallTO = 120 * time.Second   // acme.sh / socat 安装超时
-	cmdDetectTO   = 5 * time.Second     // 检测类命令超时
+	acmeIssueTO   = 180 * time.Second // 申请/安装超时
+	acmeInstallTO = 120 * time.Second // acme.sh / socat 安装超时
+	cmdDetectTO   = 5 * time.Second   // 检测类命令超时
 	// systemd 服务的 PATH 可能不全(且不继承登录 shell),补一个兜底,
 	// 确保 exec 调用能定位 nginx/socat/systemctl/apt 等。
 	fallbackPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -1580,7 +1580,7 @@ func (a *AcmeService) buildReloadCmd(method string, behindProxy bool) string {
 // 是用户的,后端算好天数反而会差一天。
 type CertInfo struct {
 	Domain    string `json:"domain"`
-	CertFile  string `json:"certFile"`  // 摆出来供复制:建入站 TLS 时要填进 certificate_path
+	CertFile  string `json:"certFile"` // 摆出来供复制:建入站 TLS 时要填进 certificate_path
 	KeyFile   string `json:"keyFile"`
 	CA        string `json:"ca"`
 	KeyType   string `json:"keyType"`
