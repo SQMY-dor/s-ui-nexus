@@ -71,11 +71,13 @@ func GetDb(exclude string) ([]byte, error) {
 		&model.Stats{},
 		&model.Client{},
 		&model.Changes{},
+		&model.Node{},
 	)
 	if err != nil {
 		return nil, err
 	}
 
+	var nodes []model.Node
 	var settings []model.Setting
 	var tls []model.Tls
 	var inbound []model.Inbound
@@ -165,6 +167,16 @@ func GetDb(exclude string) ([]byte, error) {
 		return nil, err
 	} else if len(clients) > 0 {
 		if err := backupDb.Save(clients).Error; err != nil {
+			return nil, err
+		}
+	}
+	// Node rows carry the apiv2 token this panel authenticates to each node
+	// with (write-only in the UI), so a backup without them cannot rebuild a
+	// cluster. Ported from shenaba/2s-ui (GPL-3.0).
+	if err := db.Model(&model.Node{}).Scan(&nodes).Error; err != nil {
+		return nil, err
+	} else if len(nodes) > 0 {
+		if err := backupDb.Save(nodes).Error; err != nil {
 			return nil, err
 		}
 	}
