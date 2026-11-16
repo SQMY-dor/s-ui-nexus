@@ -9,6 +9,8 @@
 [![Downloads](https://img.shields.io/github/downloads/felixbennettio/s-ui-next/total.svg)](https://github.com/felixbennettio/s-ui-next/releases)
 [![License](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
 
+> **S-UI Nexus** is a downstream fork of [felixbennettio/s-ui-next](https://github.com/felixbennettio/s-ui-next) that ports the multi-node cluster and automatic HTTPS (acme.sh + nginx reverse proxy) features from [shenaba/2s-ui](https://github.com/shenaba/2s-ui). Frontend: [SQMY-dor/s-ui-nexus-frontend](https://github.com/SQMY-dor/s-ui-nexus-frontend). Like both upstreams it is licensed under GPL-3.0, and all upstream credits are kept. The original S-UI Next documentation follows.
+
 S-UI Next is a downstream project based on [alireza0/s-ui](https://github.com/alireza0/s-ui). It keeps the original panel and database model while adding a versioned API, Android and iPhone management apps, stronger administrator authentication, searchable traffic and connection records, safer subscription links, WireGuard relays between VPS hosts, and directly managed Cloudflare WARP egress.
 
 The embedded core currently follows `sing-box v1.13.14`. Existing Web management, API v2, database, and subscription interfaces remain available, so an existing S-UI installation can be migrated without rebuilding its configuration from scratch.
@@ -229,7 +231,7 @@ cd s-ui-next
 ```
 
 - Backend: Go `1.26.5`; the exact version is declared in `go.mod`.
-- Frontend: Vue and TypeScript in the [`frontend`](https://github.com/felixbennettio/s-ui-next-frontend) submodule. Use `npm ci`, then `npm run build`.
+- Frontend: Vue and TypeScript in the [`frontend`](https://github.com/SQMY-dor/s-ui-nexus-frontend) submodule. Use `npm ci`, then `npm run build`.
 - Mobile: Flutter source lives in `mobile/`.
 - Full development and contribution instructions are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 

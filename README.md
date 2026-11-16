@@ -9,6 +9,8 @@
 [![下载量](https://img.shields.io/github/downloads/felixbennettio/s-ui-next/total.svg)](https://github.com/felixbennettio/s-ui-next/releases)
 [![许可证](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
 
+> **S-UI Nexus** 是 [felixbennettio/s-ui-next](https://github.com/felixbennettio/s-ui-next) 的下游分支，计划移植 [shenaba/2s-ui](https://github.com/shenaba/2s-ui) 的多节点集群与自动 HTTPS（acme.sh + nginx 反代）功能。前端仓库：[SQMY-dor/s-ui-nexus-frontend](https://github.com/SQMY-dor/s-ui-nexus-frontend)。本项目与上游一样以 GPL-3.0 发布，保留所有上游署名。以下为 S-UI Next 原文档。
+
 S-UI Next 是基于 [alireza0/s-ui](https://github.com/alireza0/s-ui) 继续维护的下游项目。它保留原有面板和数据库模型，在此基础上加入版本化 API、Android 与 iPhone 管理 App、管理员多因素认证、可检索的流量与连接记录、更加稳妥的订阅链接、支持双 VPS 中转的 WireGuard，以及可直接创建的 Cloudflare WARP 出口。
 
 当前内置核心使用 `sing-box v1.13.14`。原有 Web 管理方式、API v2、数据库和订阅接口继续保留，已有 S-UI 数据可以迁移，不需要重新录入整套配置。
@@ -229,7 +231,7 @@ cd s-ui-next
 ```
 
 - 后端使用 Go，准确版本见 `go.mod`。
-- Web 前端使用 Vue 和 TypeScript，位于 [`frontend`](https://github.com/felixbennettio/s-ui-next-frontend) 子模块。
+- Web 前端使用 Vue 和 TypeScript，位于 [`frontend`](https://github.com/SQMY-dor/s-ui-nexus-frontend) 子模块。
 - Flutter 移动端源码位于 `mobile/`。
 - 完整开发与贡献说明见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 
