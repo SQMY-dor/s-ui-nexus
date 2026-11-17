@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/felixbennettio/s-ui-next/database"
 	"github.com/felixbennettio/s-ui-next/database/model"
@@ -305,5 +306,46 @@ func TestRefreshReplicasPullsNodeSideEdits(t *testing.T) {
 	}
 	if changes != 1 {
 		t.Errorf("changes rows = %d after an unchanged refresh, want the first 1", changes)
+	}
+}
+
+// s-ui-nexus: the 30s background backoff follows failures only, so a second
+// client saved seconds after a successful push is fanned out immediately.
+func TestReconcileBackoffOnlyAfterFailure(t *testing.T) {
+	var s NodeSyncService
+	const id = uint(9001)
+	t.Cleanup(func() {
+		reconcileMu.Lock()
+		delete(reconcileBusy, id)
+		delete(reconcileLast, id)
+		reconcileMu.Unlock()
+	})
+
+	if _, ok := s.claimReconcile(id, false); !ok {
+		t.Fatal("first claim refused")
+	}
+	if _, ok := s.claimReconcile(id, false); ok {
+		t.Fatal("single-flight: a second claim while busy must be refused")
+	}
+	if _, ok := s.claimReconcile(id, true); ok {
+		t.Fatal("single-flight applies to interactive claims too")
+	}
+	s.releaseReconcile(id, false)
+	if _, ok := s.claimReconcile(id, false); !ok {
+		t.Fatal("after a successful run the next background claim must not wait for the backoff")
+	}
+	s.releaseReconcile(id, true)
+	if _, ok := s.claimReconcile(id, false); ok {
+		t.Fatal("after a failed run background claims must back off")
+	}
+	if _, ok := s.claimReconcile(id, true); !ok {
+		t.Fatal("interactive claims skip the backoff")
+	}
+	s.releaseReconcileNoBackoff(id)
+	reconcileMu.Lock()
+	reconcileLast[id] = time.Now().Add(-reconcileBackoff - time.Second)
+	reconcileMu.Unlock()
+	if _, ok := s.claimReconcile(id, false); !ok {
+		t.Fatal("background claims resume once the backoff has elapsed")
 	}
 }

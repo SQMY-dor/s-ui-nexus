@@ -393,12 +393,18 @@ type nodeClientState struct {
 // This is the background entry: single-flight per node plus a 30s backoff so
 // heartbeat/fanout triggers don't stampede. A skip returns nil — the dirty
 // flag stays set and the next heartbeat retries.
-func (s *NodeSyncService) Reconcile(nodeId uint) error {
+//
+// s-ui-nexus: the backoff only follows a FAILED run. After a successful run
+// the node is healthy and the next change (a second client saved a few
+// seconds after the first) must be pushed by its own fanout, not wait out a
+// 30s window; overlapping triggers are still collapsed by single-flight and
+// the dirty generation.
+func (s *NodeSyncService) Reconcile(nodeId uint) (err error) {
 	gen, ok := s.claimReconcile(nodeId, false)
 	if !ok {
 		return nil
 	}
-	defer s.releaseReconcile(nodeId)
+	defer func() { s.releaseReconcile(nodeId, err != nil) }()
 	return s.runReconcile(nodeId, gen)
 }
 
@@ -1196,11 +1202,17 @@ func (s *NodeSyncService) releaseReconcileNoBackoff(nodeId uint) {
 	reconcileBusy[nodeId] = false
 }
 
-func (s *NodeSyncService) releaseReconcile(nodeId uint) {
+// releaseReconcile frees the slot; failed starts the backoff window that keeps
+// background triggers off an erroring node, success clears it.
+func (s *NodeSyncService) releaseReconcile(nodeId uint, failed bool) {
 	reconcileMu.Lock()
 	defer reconcileMu.Unlock()
 	reconcileBusy[nodeId] = false
-	reconcileLast[nodeId] = time.Now()
+	if failed {
+		reconcileLast[nodeId] = time.Now()
+	} else {
+		delete(reconcileLast, nodeId)
+	}
 }
 
 // jsonEqual compares two JSON values structurally (ignoring key order / whitespace).
