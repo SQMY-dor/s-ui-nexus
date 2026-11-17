@@ -202,6 +202,11 @@ func GetDb(exclude string) ([]byte, error) {
 		}
 	}
 
+	// auto-https (ported from shenaba/2s-ui): manual certificate registrations
+	if err := backupCertTables(db, backupDb); err != nil {
+		return nil, err
+	}
+
 	// Update WAL
 	err = backupDb.Exec("PRAGMA wal_checkpoint;").Error
 	if err != nil {

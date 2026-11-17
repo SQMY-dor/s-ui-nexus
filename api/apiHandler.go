@@ -39,6 +39,10 @@ func (a *APIHandler) initRouter(g *gin.RouterGroup) {
 func (a *APIHandler) postHandler(c *gin.Context) {
 	loginUser := GetLoginUser(c)
 	action := c.Param("postAction")
+	// auto-https (ported from shenaba/2s-ui): domains & certificates
+	if handleCertPost(c, action) {
+		return
+	}
 
 	switch action {
 	case "login":
@@ -94,6 +98,10 @@ func (a *APIHandler) postHandler(c *gin.Context) {
 
 func (a *APIHandler) getHandler(c *gin.Context) {
 	action := c.Param("getAction")
+	// auto-https (ported from shenaba/2s-ui): domains & certificates
+	if handleCertGet(c, action) {
+		return
+	}
 
 	switch action {
 	case "logout":

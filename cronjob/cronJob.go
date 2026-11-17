@@ -36,6 +36,8 @@ func (c *CronJob) Start(loc *time.Location, trafficAge int) error {
 		c.cron.AddJob("@every 1h", NewNodeReconcileJob())
 		// database WAL checkpoint
 		c.cron.AddJob("@every 10m", NewWALCheckpointJob())
+		// auto-https: daily certificate renewal check (acme.sh --cron + hot reload)
+		c.cron.AddJob("0 17 3 * * *", NewCertRenewJob())
 	}()
 
 	return nil
