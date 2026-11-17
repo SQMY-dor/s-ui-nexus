@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -45,7 +46,21 @@ func (a *APIv2Handler) postHandler(c *gin.Context) {
 
 	switch action {
 	case "save":
-		a.ApiService.Save(c, username)
+		// sync=true asks for the immediate cluster fanout the web UI always
+		// gets; without it a change still reaches nodes via the hourly
+		// safety net. Malformed values are rejected: silently degrading to
+		// "no fanout" would report success while nodes stay stale for up to
+		// an hour. (Ported from shenaba/2s-ui.)
+		fanout := false
+		if v := c.Request.FormValue("sync"); v != "" {
+			parsed, err := strconv.ParseBool(v)
+			if err != nil {
+				jsonMsg(c, "sync", common.NewErrorf("invalid sync value %q: %v", v, err))
+				return
+			}
+			fanout = parsed
+		}
+		a.ApiService.Save(c, username, fanout)
 	case "wireguardExport":
 		a.ApiService.ExportWireGuard(c)
 	case "restartApp":
@@ -69,7 +84,7 @@ func (a *APIv2Handler) getHandler(c *gin.Context) {
 	switch action {
 	case "load":
 		a.ApiService.LoadData(c)
-	case "inbounds", "outbounds", "endpoints", "services", "tls", "clients", "config":
+	case "inbounds", "outbounds", "endpoints", "services", "tls", "clients", "config", "nodes":
 		err := a.ApiService.LoadPartialData(c, []string{action})
 		if err != nil {
 			jsonMsg(c, action, err)

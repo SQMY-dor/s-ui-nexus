@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/felixbennettio/s-ui-next/database"
+	"github.com/felixbennettio/s-ui-next/database/model"
 	"github.com/felixbennettio/s-ui-next/logger"
 	"github.com/felixbennettio/s-ui-next/service"
 	"github.com/felixbennettio/s-ui-next/util"
@@ -31,6 +32,8 @@ type ApiService struct {
 	service.StatsService
 	service.ServerService
 	service.AuthService
+	service.NodeService
+	service.NodeSyncService
 }
 
 func (a *ApiService) LoadData(c *gin.Context) {
@@ -53,6 +56,9 @@ func (a *ApiService) getData(c *gin.Context) (interface{}, error) {
 		return "", err
 	}
 	onlines, err := a.StatsService.GetOnlines()
+	// Cluster heartbeat snapshot changes every 5s without bumping lastUpdate,
+	// so it rides on every poll (it is tiny: one entry per node).
+	data["nodesStatus"] = a.NodeService.GetStatuses()
 
 	sysInfo := a.ServerService.GetSingboxInfo()
 	data["coreApplying"] = a.ConfigService.CoreApplying()
@@ -113,6 +119,11 @@ func (a *ApiService) getData(c *gin.Context) (interface{}, error) {
 		data["subURI"] = subURI
 		data["enableTraffic"] = trafficAge > 0
 		data["onlines"] = onlines
+		nodes, err := a.NodeService.GetAllWithStatus()
+		if err != nil {
+			return "", err
+		}
+		data["nodes"] = nodes
 	} else {
 		data["onlines"] = onlines
 	}
@@ -166,7 +177,15 @@ func (a *ApiService) partialData(c *gin.Context, objs []string) (map[string]inte
 			}
 			data[obj] = tlsConfigs
 		case "clients":
-			clients, err := a.ClientService.Get(id)
+			// full=1 is the cluster reconcile read: a master needs config to
+			// diff against its own copy (service/nodeSync.go).
+			var clients *[]model.Client
+			var err error
+			if id == "" && c.Query("full") == "1" {
+				clients, err = a.ClientService.GetAllWithConfig()
+			} else {
+				clients, err = a.ClientService.Get(id)
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -183,6 +202,12 @@ func (a *ApiService) partialData(c *gin.Context, objs []string) (map[string]inte
 				return nil, err
 			}
 			data[obj] = settings
+		case "nodes":
+			nodes, err := a.NodeService.GetAllWithStatus()
+			if err != nil {
+				return nil, err
+			}
+			data[obj] = nodes
 		}
 	}
 
@@ -336,7 +361,12 @@ func (a *ApiService) ChangePass(c *gin.Context) {
 	}
 }
 
-func (a *ApiService) Save(c *gin.Context, loginUser string) {
+// Save handles POST save. fanout triggers an immediate cluster node reconcile
+// for client/inbound changes (v1 always; v2 only with sync=true). It affects
+// latency only: the hourly ReconcileAllOnline pushes state regardless. Pushed
+// @cluster clients reference the receiving panel's own inbounds, so the
+// node_id scoping in expectedClients keeps them out of every outgoing push.
+func (a *ApiService) Save(c *gin.Context, loginUser string, fanout bool) {
 	hostname := getHostname(c)
 	obj := c.Request.FormValue("object")
 	act := c.Request.FormValue("action")
@@ -350,6 +380,12 @@ func (a *ApiService) Save(c *gin.Context, loginUser string) {
 	if err != nil {
 		jsonMsg(c, "save", err)
 		return
+	}
+	if fanout && (obj == "clients" || obj == "inbounds") {
+		// Fire-and-forget: the txn is committed; network IO must not block
+		// the response. Unrelated nodes are a cheap no-op diff.
+		a.NodeSyncService.MarkAllDirty()
+		go a.NodeSyncService.ReconcileDirtyOnline()
 	}
 	updated, err := a.partialData(c, objs)
 	if err != nil {
@@ -473,4 +509,62 @@ func (a *ApiService) GetCheckOutbound(c *gin.Context) {
 	link := c.Query("link")
 	result := a.ConfigService.CheckOutbound(tag, link)
 	jsonObj(c, result, nil)
+}
+
+// ---------- cluster nodes (ported from shenaba/2s-ui, GPL-3.0) ----------
+
+// TestNode probes the (possibly unsaved) node in form field "data".
+func (a *ApiService) TestNode(c *gin.Context) {
+	data := c.Request.FormValue("data")
+	status, err := a.NodeService.TestNode(json.RawMessage(data))
+	jsonObj(c, status, err)
+}
+
+// GetNodeInbounds lists a node's inbounds (GET ?id=<nodeId>), flagging adopted tags.
+func (a *ApiService) GetNodeInbounds(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Query("id"), 10, 64)
+	if err != nil {
+		jsonMsg(c, "nodeInbounds", common.NewError("invalid node id"))
+		return
+	}
+	inbounds, err := a.NodeSyncService.FetchNodeInbounds(uint(id))
+	jsonObj(c, inbounds, err)
+}
+
+// AdoptInbounds adopts form "tags" (JSON array) of node form "id" as replicas.
+func (a *ApiService) AdoptInbounds(c *gin.Context, loginUser string) {
+	id, err := strconv.ParseUint(c.Request.FormValue("id"), 10, 64)
+	if err != nil {
+		jsonMsg(c, "adoptInbounds", common.NewError("invalid node id"))
+		return
+	}
+	var tags []string
+	if err := json.Unmarshal([]byte(c.Request.FormValue("tags")), &tags); err != nil {
+		jsonMsg(c, "adoptInbounds", common.NewError("invalid tags"))
+		return
+	}
+	if err := a.NodeSyncService.AdoptInbounds(uint(id), tags, loginUser); err != nil {
+		jsonMsg(c, "adoptInbounds", err)
+		return
+	}
+	// Push the master's clients onto the freshly adopted inbounds right away.
+	// If it loses to an in-flight run, the dirty flag lets the heartbeat
+	// converge instead.
+	go func() {
+		if err := a.NodeSyncService.ReconcileNow(uint(id)); err != nil {
+			logger.Warning("adopt: initial reconcile failed: ", err)
+		}
+	}()
+	jsonMsg(c, "adoptInbounds", nil)
+}
+
+// ReconcileNode runs an interactive reconcile of node form "id".
+func (a *ApiService) ReconcileNode(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Request.FormValue("id"), 10, 64)
+	if err != nil {
+		jsonMsg(c, "reconcileNode", common.NewError("invalid node id"))
+		return
+	}
+	err = a.NodeSyncService.ReconcileNow(uint(id))
+	jsonMsg(c, "reconcileNode", err)
 }
