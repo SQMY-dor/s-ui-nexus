@@ -516,9 +516,19 @@ func (s *NodeService) Save(tx *gorm.DB, act string, data json.RawMessage) error 
 		if (act == "new" || oldName != node.Name) && strings.ContainsAny(node.Name, "[]") {
 			return common.NewError("node name cannot contain [ or ]")
 		}
+		disabled := !node.Enable
 		err = tx.Save(&node).Error
 		if err != nil {
 			return err
+		}
+		// GORM leaves a false bool out of the INSERT for a column with a
+		// default (enable defaults to true), so a node created switched off
+		// was stored switched on.
+		if act == "new" && disabled {
+			node.Enable = false
+			if err = tx.Model(model.Node{}).Where("id = ?", node.Id).Update("enable", false).Error; err != nil {
+				return err
+			}
 		}
 		// A rename would orphan the "[old] " aggregated links (refreshNodeLinks
 		// keys the prefix on the current name); carry them over in place.

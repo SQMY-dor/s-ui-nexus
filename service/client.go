@@ -364,7 +364,7 @@ func (s *ClientService) updateLinksWithFixedInbounds(tx *gorm.DB, clients []*mod
 
 		newClientLinks := []map[string]string{}
 		for _, inbound := range inbounds {
-			newLinks := util.LinkGenerator(client.Config, &inbound, hostname)
+			newLinks := inboundLinks(client.Config, &inbound, hostname)
 			for _, newLink := range newLinks {
 				newClientLinks = append(newClientLinks, map[string]string{
 					"remark": inbound.Tag,
@@ -413,54 +413,120 @@ func (s *ClientService) updateLinksWithFixedInbounds(tx *gorm.DB, clients []*mod
 	return nil
 }
 
+// UpdateClientsOnInboundAdd binds the clients named in the comma-separated
+// `initUsers` request field to a freshly created inbound.
 func (s *ClientService) UpdateClientsOnInboundAdd(tx *gorm.DB, initIds string, inboundId uint, hostname string) error {
-	clientIds := strings.Split(initIds, ",")
-	var clients []model.Client
-	err := tx.Model(model.Client{}).Where("id in ?", clientIds).Find(&clients).Error
+	clientIds, err := parseClientIds(initIds)
 	if err != nil {
 		return err
 	}
-	var inbound model.Inbound
-	err = tx.Model(model.Inbound{}).Preload("Tls").Where("id = ?", inboundId).Find(&inbound).Error
+	_, err = s.AddInboundsToClients(tx, clientIds, []uint{inboundId}, hostname)
+	return err
+}
+
+// bindableClientsWhere narrows a client query (one placeholder: clusterGroup)
+// to the clients this panel may bind to inbounds by its own choice. A @cluster
+// client was pushed here by a master this panel is a node of, and that
+// master's reconcile compares and rewrites its inbounds: an id bound here would
+// be stripped again. Both binding paths -- a new local inbound (initUsers,
+// including the core user list it builds) and node adoption -- go through it.
+// Ported from shenaba/2s-ui (GPL-3.0) #300.
+const bindableClientsWhere = "COALESCE(`group`, '') <> ?"
+
+// AddInboundsToClients appends inboundIds to each client's inbound list and
+// gives it the links they produce: the one write path for "these new inbounds
+// belong to these clients", whether created here or adopted from a node.
+//
+// Links go through inboundLinks, so a disabled local inbound gets none. A node
+// replica gets no local link: one generated here would carry THIS panel's
+// hostname; its real link is the node's own "external" entry, which
+// refreshNodeLinks folds in on the next reconcile. An id the client already
+// holds is not added twice, a client id that matches no row is skipped, and so
+// is a @cluster client. It returns the ids of the clients it did bind.
+func (s *ClientService) AddInboundsToClients(tx *gorm.DB, clientIds []uint, inboundIds []uint, hostname string) ([]uint, error) {
+	if len(clientIds) == 0 || len(inboundIds) == 0 {
+		return nil, nil
+	}
+	// Only what the links are built from and the two columns written back: a
+	// whole-row Save per client would also rewrite columns (traffic, enable)
+	// nothing here changed.
+	var clients []model.Client
+	err := tx.Model(model.Client{}).Select("id", "config", "inbounds", "links").
+		Where("id in ? AND "+bindableClientsWhere, clientIds, clusterGroup).Find(&clients).Error
 	if err != nil {
-		return err
+		return nil, err
+	}
+	var inbounds []model.Inbound
+	err = tx.Model(model.Inbound{}).Preload("Tls").Where("id in ?", inboundIds).Find(&inbounds).Error
+	if err != nil {
+		return nil, err
+	}
+	var bound []uint
+	// Local inbounds whose links this call regenerates, by tag: a stale link
+	// under one of these remarks is replaced rather than kept beside the new.
+	localTags := map[string]bool{}
+	for i := range inbounds {
+		if inbounds[i].NodeId == nil {
+			localTags[inbounds[i].Tag] = true
+		}
 	}
 	for _, client := range clients {
-		// Add inbounds
 		var clientInbounds []uint
 		json.Unmarshal(client.Inbounds, &clientInbounds)
-		clientInbounds = append(clientInbounds, inboundId)
+		held := make(map[uint]bool, len(clientInbounds))
+		for _, id := range clientInbounds {
+			held[id] = true
+		}
+		added := false
+		for i := range inbounds {
+			if !held[inbounds[i].Id] {
+				clientInbounds = append(clientInbounds, inbounds[i].Id)
+				held[inbounds[i].Id] = true
+				added = true
+			}
+		}
+		if !added {
+			continue
+		}
+		if clientInbounds == nil {
+			clientInbounds = []uint{}
+		}
 		client.Inbounds, err = json.MarshalIndent(clientInbounds, "", "  ")
 		if err != nil {
-			return err
+			return nil, err
 		}
-		// Add links
-		var clientLinks, newClientLinks []map[string]string
+		var clientLinks []map[string]string
+		newClientLinks := []map[string]string{}
 		json.Unmarshal(client.Links, &clientLinks)
-		newLinks := util.LinkGenerator(client.Config, &inbound, hostname)
-		for _, newLink := range newLinks {
-			newClientLinks = append(newClientLinks, map[string]string{
-				"remark": inbound.Tag,
-				"type":   "local",
-				"uri":    newLink,
-			})
+		for i := range inbounds {
+			inbound := &inbounds[i]
+			if inbound.NodeId != nil {
+				continue
+			}
+			for _, newLink := range inboundLinks(client.Config, inbound, hostname) {
+				newClientLinks = append(newClientLinks, map[string]string{
+					"remark": inbound.Tag,
+					"type":   "local",
+					"uri":    newLink,
+				})
+			}
 		}
 		for _, clientLink := range clientLinks {
-			if clientLink["remark"] != inbound.Tag {
+			if !localTags[clientLink["remark"]] {
 				newClientLinks = append(newClientLinks, clientLink)
 			}
 		}
-
 		client.Links, err = json.MarshalIndent(newClientLinks, "", "  ")
 		if err != nil {
-			return err
+			return nil, err
 		}
-		err = tx.Save(&client).Error
+		err = tx.Model(&client).Select("inbounds", "links").Updates(&client).Error
 		if err != nil {
-			return err
+			return nil, err
 		}
+		bound = append(bound, client.Id)
 	}
-	return nil
+	return bound, nil
 }
 
 func (s *ClientService) UpdateClientsOnInboundDelete(tx *gorm.DB, id uint, tag string) error {
@@ -539,7 +605,7 @@ func (s *ClientService) UpdateLinksByInboundChange(tx *gorm.DB, inbounds *[]mode
 		for _, client := range clients {
 			var clientLinks, newClientLinks []map[string]string
 			json.Unmarshal(client.Links, &clientLinks)
-			newLinks := util.LinkGenerator(client.Config, &inbound, hostname)
+			newLinks := inboundLinks(client.Config, &inbound, hostname)
 			for _, newLink := range newLinks {
 				newClientLinks = append(newClientLinks, map[string]string{
 					"remark": inbound.Tag,
@@ -564,6 +630,20 @@ func (s *ClientService) UpdateLinksByInboundChange(tx *gorm.DB, inbounds *[]mode
 		}
 	}
 	return nil
+}
+
+// inboundLinks is a client's share links for one local inbound: none for a
+// disabled one. Every stored local link is built through here, and each
+// rebuild drops the local links it no longer returns, so switching an inbound
+// off takes its links out of every subscription and switching it back on
+// brings them back. The gate is here rather than in util.LinkGenerator, where
+// every Inbound literal -- enable being false at its zero value -- would read
+// as switched off. Ported from shenaba/2s-ui (GPL-3.0).
+func inboundLinks(config json.RawMessage, inbound *model.Inbound, hostname string) []string {
+	if !inbound.Enable {
+		return nil
+	}
+	return util.LinkGenerator(config, inbound, hostname)
 }
 
 func (s *ClientService) DepleteClients() (inboundIds []uint, err error) {

@@ -37,7 +37,8 @@ func (s *LinkService) GetLinks(linkJson *json.RawMessage, types string, clientIn
 			}
 		case "local":
 			if types == "all" {
-				result = append(result, s.addClientInfo(link.Uri, clientInfo))
+				// Links stored before QUIC links stopped carrying fp (#310).
+				result = append(result, s.addClientInfo(util.DropQuicLinkFingerprint(link.Uri), clientInfo))
 			}
 		}
 	}

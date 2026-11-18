@@ -99,6 +99,10 @@ func InitDB(dbPath string) error {
 		db.Create(&defaultOutbound)
 	}
 
+	// Per-inbound traffic cap (ported from shenaba/2s-ui): decided before
+	// AutoMigrate adds the counter columns.
+	seedTraffic := needsInboundTrafficSeed(db)
+
 	err = db.AutoMigrate(
 		&model.Setting{},
 		&model.Tls{},
@@ -121,6 +125,13 @@ func InitDB(dbPath string) error {
 	// auto-https (ported from shenaba/2s-ui): certs table
 	if err = migrateCertTables(db); err != nil {
 		return err
+	}
+	// Per-inbound traffic cap: seed the new up/down counters from the stats
+	// history, once (the columns' absence was the marker).
+	if seedTraffic {
+		if err = seedInboundTraffic(db); err != nil {
+			return err
+		}
 	}
 	err = initUser()
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/felixbennettio/s-ui-next/database"
@@ -58,7 +59,15 @@ func (s *InboundService) GetAll() (*[]map[string]interface{}, error) {
 			"id":     inbound.Id,
 			"type":   inbound.Type,
 			"tag":    inbound.Tag,
+			"enable": inbound.Enable,
 			"tls_id": inbound.TlsId,
+		}
+		// The traffic cap and the counters it is judged against; a replica's
+		// traffic is counted on its node.
+		if inbound.NodeId == nil {
+			inbData["volume"] = inbound.Volume
+			inbData["up"] = inbound.Up
+			inbData["down"] = inbound.Down
 		}
 		if inbound.NodeId != nil {
 			inbData["node_id"] = *inbound.NodeId
@@ -77,9 +86,10 @@ func (s *InboundService) GetAll() (*[]map[string]interface{}, error) {
 				json.Unmarshal(restFields["managed"], &ss_managed)
 			}
 		}
-		if s.hasUser(inbound.Type) &&
-			!(inbound.Type == "shadowtls" && shadowtls_version < 3) &&
-			!(inbound.Type == "shadowsocks" && ss_managed) {
+		// The list's "users" key is present exactly when the inbound takes
+		// users: a master adopting from this panel reads it that way
+		// (nodeInboundTakesUsers), so it must stay on takesUsers.
+		if takesUsers(inbound.Type, int(shadowtls_version), ss_managed) {
 			users := []string{}
 			err = db.Raw("SELECT clients.name FROM clients, json_each(clients.inbounds) as je WHERE je.value = ?", inbound.Id).Scan(&users).Error
 			if err != nil {
@@ -127,9 +137,13 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			}
 		}
 		var oldTag string
+		// Whether the core holds the stored inbound: a disabled one is not in
+		// it, so there is nothing to replace or remove.
+		oldRunning := false
 		if act == "edit" {
 			var old model.Inbound
-			err = tx.Model(model.Inbound{}).Select("tag", "node_id").Where("id = ?", inbound.Id).Find(&old).Error
+			err = tx.Model(model.Inbound{}).Select("tag", "node_id", "enable", "volume", "up", "down").
+				Where("id = ?", inbound.Id).Find(&old).Error
 			if err != nil {
 				return err
 			}
@@ -137,33 +151,58 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 				return common.NewError("inbound belongs to a cluster node: manage it on the node panel")
 			}
 			oldTag = old.Tag
+			oldRunning = old.Enable
+			// An edit that does not say keeps what is stored. Read as "on" --
+			// the default a new inbound gets -- a caller that predates the
+			// switch, or a form that rebuilt the object, would turn a disabled
+			// inbound back on.
+			if !inbound.EnableSet {
+				inbound.Enable = old.Enable
+			}
+			err = keepInboundCap(&inbound, &old)
+			if err != nil {
+				return err
+			}
+		}
+		err = checkInboundDetour(tx, &inbound, oldTag)
+		if err != nil {
+			return err
 		}
 
 		if corePtr.IsRunning() {
-			if act == "edit" {
+			if act == "edit" && oldRunning {
 				err = corePtr.RemoveInbound(oldTag)
 				if err != nil && err != os.ErrInvalid {
 					return err
 				}
+				// Switched off: closing the listener leaves the connections
+				// it accepted open.
+				if !inbound.Enable {
+					if box := corePtr.GetInstance(); box != nil {
+						box.ConnTracker().CloseConnByInbound(oldTag)
+					}
+				}
 			}
 
-			inboundConfig, err := inbound.MarshalJSON()
-			if err != nil {
-				return err
-			}
+			if inbound.Enable {
+				inboundConfig, err := inbound.MarshalJSON()
+				if err != nil {
+					return err
+				}
 
-			if act == "edit" {
-				inboundConfig, err = s.addUsers(tx, inboundConfig, inbound.Id, inbound.Type)
-			} else {
-				inboundConfig, err = s.initUsers(tx, inboundConfig, initUserIds, inbound.Type)
-			}
-			if err != nil {
-				return err
-			}
+				if act == "edit" {
+					inboundConfig, err = s.addUsers(tx, inboundConfig, inbound.Id, inbound.Type)
+				} else {
+					inboundConfig, err = s.initUsers(tx, inboundConfig, initUserIds, inbound.Type)
+				}
+				if err != nil {
+					return err
+				}
 
-			err = corePtr.AddInbound(inboundConfig)
-			if err != nil {
-				return err
+				err = corePtr.AddInbound(inboundConfig)
+				if err != nil {
+					return err
+				}
 			}
 		}
 
@@ -172,7 +211,8 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			return err
 		}
 
-		err = tx.Save(&inbound).Error
+		// The counters are the stats flush's alone (see model.Inbound).
+		err = tx.Omit("up", "down").Save(&inbound).Error
 		if err != nil {
 			return err
 		}
@@ -214,6 +254,8 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		if err != nil {
 			return err
 		}
+	case "resetTraffic":
+		return s.resetTraffic(tx, data, hostname)
 	default:
 		return common.NewErrorf("unknown action: %s", act)
 	}
@@ -246,8 +288,9 @@ func (s *InboundService) GetAllConfig(db *gorm.DB) ([]json.RawMessage, error) {
 	var inboundsJson []json.RawMessage
 	var inbounds []*model.Inbound
 	// node_id IS NULL: replicas of remote cluster inbounds must never reach
-	// the local core; their ports live on other machines.
-	err := db.Model(model.Inbound{}).Preload("Tls").Where("node_id IS NULL").Find(&inbounds).Error
+	// the local core; their ports live on other machines. A disabled inbound
+	// stays out too.
+	err := db.Model(model.Inbound{}).Preload("Tls").Where("node_id IS NULL AND enable = ?", true).Find(&inbounds).Error
 	if err != nil {
 		return nil, err
 	}
@@ -273,7 +316,29 @@ func (s *InboundService) hasUser(inboundType string) bool {
 	return false
 }
 
-func (s *InboundService) fetchUsers(db *gorm.DB, inboundType string, condition string, inbound map[string]interface{}) ([]json.RawMessage, error) {
+// takesUsers is the one rule for whether an inbound carries a per-client user
+// list, so whether clients can be bound to it at all: a type with users,
+// shadowtls only from v3, and no managed shadowsocks (its users live outside
+// the panel). The inbounds list (GetAll) decides by it, and so, through that
+// list, does a master adopting from this panel. Ported from shenaba/2s-ui
+// (GPL-3.0) #300.
+func takesUsers(inboundType string, shadowtlsVersion int, ssManaged bool) bool {
+	if !(&InboundService{}).hasUser(inboundType) {
+		return false
+	}
+	switch inboundType {
+	case "shadowtls":
+		return shadowtlsVersion >= 3
+	case "shadowsocks":
+		return !ssManaged
+	}
+	return true
+}
+
+// fetchUsers collects the per-client config for one inbound type. condition is
+// a WHERE fragment and args are its placeholders -- callers must not build
+// values into the fragment, since one of them comes from a request.
+func (s *InboundService) fetchUsers(db *gorm.DB, inboundType string, condition string, inbound map[string]interface{}, args ...interface{}) ([]json.RawMessage, error) {
 	if inboundType == "shadowtls" {
 		version, _ := inbound["version"].(float64)
 		if int(version) < 3 {
@@ -292,7 +357,7 @@ func (s *InboundService) fetchUsers(db *gorm.DB, inboundType string, condition s
 	err := db.Raw(
 		fmt.Sprintf(`SELECT json_extract(clients.config, "$.%s")
 		FROM clients WHERE enable = true AND %s`,
-			inboundType, condition)).Scan(&users).Error
+			inboundType, condition), args...).Scan(&users).Error
 	if err != nil {
 		return nil, err
 	}
@@ -317,8 +382,7 @@ func (s *InboundService) addUsers(db *gorm.DB, inboundJson []byte, inboundId uin
 		return nil, err
 	}
 
-	condition := fmt.Sprintf("%d IN (SELECT json_each.value FROM json_each(clients.inbounds))", inboundId)
-	inbound["users"], err = s.fetchUsers(db, inboundType, condition, inbound)
+	inbound["users"], err = s.fetchUsers(db, inboundType, "? IN (SELECT json_each.value FROM json_each(clients.inbounds))", inbound, inboundId)
 	if err != nil {
 		return nil, err
 	}
@@ -326,8 +390,29 @@ func (s *InboundService) addUsers(db *gorm.DB, inboundJson []byte, inboundId uin
 	return json.Marshal(inbound)
 }
 
+// parseClientIds parses the comma-separated initUsers request field. Empty
+// parts are skipped; anything else that is not an id is refused.
+func parseClientIds(raw string) ([]uint, error) {
+	var ids []uint
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		id, err := strconv.ParseUint(part, 10, 32)
+		if err != nil {
+			return nil, common.NewErrorf("invalid client id %q", part)
+		}
+		ids = append(ids, uint(id))
+	}
+	return ids, nil
+}
+
 func (s *InboundService) initUsers(db *gorm.DB, inboundJson []byte, clientIds string, inboundType string) ([]byte, error) {
-	ClientIds := strings.Split(clientIds, ",")
+	ClientIds, err := parseClientIds(clientIds)
+	if err != nil {
+		return nil, err
+	}
 	if len(ClientIds) == 0 {
 		return inboundJson, nil
 	}
@@ -337,13 +422,16 @@ func (s *InboundService) initUsers(db *gorm.DB, inboundJson []byte, clientIds st
 	}
 
 	var inbound map[string]interface{}
-	err := json.Unmarshal(inboundJson, &inbound)
+	err = json.Unmarshal(inboundJson, &inbound)
 	if err != nil {
 		return nil, err
 	}
 
-	condition := fmt.Sprintf("id IN (%s)", strings.Join(ClientIds, ","))
-	inbound["users"], err = s.fetchUsers(db, inboundType, condition, inbound)
+	// The same clients AddInboundsToClients binds, or the core would serve a
+	// @cluster client whose row never gets the inbound. Ids are bound as
+	// placeholders: the list comes from the request (it used to be pasted into
+	// the SQL).
+	inbound["users"], err = s.fetchUsers(db, inboundType, "id IN ? AND "+bindableClientsWhere, inbound, ClientIds, clusterGroup)
 	if err != nil {
 		return nil, err
 	}
@@ -356,7 +444,9 @@ func (s *InboundService) RestartInbounds(tx *gorm.DB, ids []uint) error {
 		return nil
 	}
 	var inbounds []*model.Inbound
-	err := tx.Model(model.Inbound{}).Preload("Tls").Where("id in ?", ids).Where("node_id IS NULL").Find(&inbounds).Error
+	// Not a disabled inbound either: re-adding it here (a client or TLS edit)
+	// would switch it back on.
+	err := tx.Model(model.Inbound{}).Preload("Tls").Where("id in ?", ids).Where("node_id IS NULL AND enable = ?", true).Find(&inbounds).Error
 	if err != nil {
 		return err
 	}

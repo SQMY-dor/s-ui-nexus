@@ -109,7 +109,7 @@ func (j *JsonService) getData(subId string) (*model.Client, []*model.Inbound, er
 		return nil, nil, err
 	}
 	var inbounds []*model.Inbound
-	err = db.Model(model.Inbound{}).Preload("Tls").Where("id in ? and node_id IS NULL", clientInbounds).Find(&inbounds).Error
+	err = db.Model(model.Inbound{}).Preload("Tls").Where("id in ? and node_id IS NULL and enable = ?", clientInbounds, true).Find(&inbounds).Error
 	if err != nil {
 		return nil, nil, err
 	}
@@ -172,9 +172,13 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 		if err != nil {
 			return nil, nil, err
 		}
+		// Stored out_json may predate dropping uTLS from QUIC protocols, which
+		// a sing-box client refuses outright on them (shenaba/2s-ui #310).
+		util.StripQuicOutboundTls(outbound)
 		tag, _ := outbound["tag"].(string)
 		if len(addrs) == 0 {
 			// For mixed protocol, use separated socks and http
+			applyDefaultHost(outbound)
 			if protocol == "mixed" {
 				outbound["tag"] = tag
 				j.pushMixed(&outbounds, &outTags, outbound)
@@ -205,6 +209,10 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 					}
 					newOut["tls"] = outTls
 				}
+				// An address's TLS override may carry uTLS too.
+				util.StripQuicOutboundTls(newOut)
+				// After the override: an address's own server_name is its Host.
+				applyDefaultHost(newOut)
 
 				remark, _ := addr["remark"].(string)
 				newTag := fmt.Sprintf("%d.%s%s", index+1, tag, remark)
@@ -220,6 +228,18 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 		}
 	}
 	return &outbounds, &outTags, nil
+}
+
+// applyDefaultHost gives a ws or httpupgrade outbound with no Host of its own
+// the one its share link carries, the TLS server_name (util.DefaultTransportHost):
+// left out, the client sends the server address, which a CDN reached through a
+// clean-IP domain answers with 403. Upstream s-ui #1334 via shenaba/2s-ui.
+func applyDefaultHost(out map[string]interface{}) {
+	tls, _ := out["tls"].(map[string]interface{})
+	transport, _ := out["transport"].(map[string]interface{})
+	if host := util.DefaultTransportHost(transport, tls); host != "" {
+		out["transport"] = util.SetTransportHost(transport, host)
+	}
 }
 
 func (j *JsonService) addDefaultOutbounds(outbounds *[]map[string]interface{}, outTags *[]string) {
