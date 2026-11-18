@@ -191,7 +191,9 @@ jobs:
       - name: Download rendered app icon
         uses: actions/download-artifact@v8
         with:
-          name: mobile-app-icon-${{ github.run_id }}-${{ github.run_attempt }}
+          # Pattern, not the exact attempt: "Re-run failed jobs" keeps the icon from the earlier attempt.
+          pattern: mobile-app-icon-${{ github.run_id }}-*
+          merge-multiple: true
           path: ${{ runner.temp }}/mobile-icon
 
       - name: Prepare Android project
@@ -251,7 +253,9 @@ jobs:
       - name: Download rendered app icon
         uses: actions/download-artifact@v8
         with:
-          name: mobile-app-icon-${{ github.run_id }}-${{ github.run_attempt }}
+          # Pattern, not the exact attempt: "Re-run failed jobs" keeps the icon from the earlier attempt.
+          pattern: mobile-app-icon-${{ github.run_id }}-*
+          merge-multiple: true
           path: ${{ runner.temp }}/mobile-icon
 
       - name: Prepare iPhone project
