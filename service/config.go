@@ -316,6 +316,10 @@ func (s *ConfigService) SaveWithApply(obj string, act string, data json.RawMessa
 		}
 		err = s.InboundService.Save(tx, act, data, initUsers, hostname)
 		objs = append(objs, "clients", "config", "endpoints")
+		if (act == "new" || act == "edit") && hasInlineTls(data) {
+			// The inline tls became a Tls record (issue #29).
+			objs = append(objs, "tls")
+		}
 		if err == nil {
 			var referencesChanged bool
 			referencesChanged, err = renameInboundReferences(tx, oldTag, newTag)
@@ -623,4 +627,17 @@ func (s *ConfigService) GetChanges(actor string, chngKey string, count string) [
 		return []model.Changes{}
 	}
 	return result.Items
+}
+
+// hasInlineTls reports whether an inbound payload carries a tls object
+// without a tls_id, which InboundService.Save stores as a Tls record.
+func hasInlineTls(data json.RawMessage) bool {
+	var probe struct {
+		TlsId uint                   `json:"tls_id"`
+		Tls   map[string]interface{} `json:"tls"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return false
+	}
+	return probe.TlsId == 0 && len(probe.Tls) > 0
 }

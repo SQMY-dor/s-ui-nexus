@@ -122,10 +122,9 @@ func LinkGenerator(clientConfig json.RawMessage, i *model.Inbound, hostname stri
 		return []string{}
 	}
 
-	var tls map[string]interface{}
-	if i.TlsId > 0 {
-		tls = prepareTls(i.Tls)
-	}
+	// EffectiveTls also covers an inbound that still carries an inline tls
+	// object instead of a tls_id (issue #29).
+	tls := prepareTls(EffectiveTls(i))
 
 	var userConfig map[string]map[string]interface{}
 	if err := json.Unmarshal(clientConfig, &userConfig); err != nil {
@@ -142,14 +141,14 @@ func LinkGenerator(clientConfig json.RawMessage, i *model.Inbound, hostname stri
 			"server_port": (*inbound)["listen_port"],
 			"remark":      i.Tag,
 		})
-		if i.TlsId > 0 {
+		if tls != nil {
 			Addrs[0]["tls"] = tls
 		}
 	} else {
 		for index, addr := range Addrs {
 			addrRemark, _ := addr["remark"].(string)
 			Addrs[index]["remark"] = i.Tag + addrRemark
-			if i.TlsId > 0 {
+			if tls != nil {
 				newTls := map[string]interface{}{}
 				for k, v := range tls {
 					newTls[k] = v

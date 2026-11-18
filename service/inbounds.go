@@ -130,6 +130,12 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		if inbound.NodeId != nil {
 			return common.NewError("inbound belongs to a cluster node: manage it on the node panel")
 		}
+		if inbound.TlsId == 0 && len(inbound.InlineTls) > 0 {
+			err = attachInlineTls(tx, &inbound, act)
+			if err != nil {
+				return err
+			}
+		}
 		if inbound.TlsId > 0 {
 			err = tx.Model(model.Tls{}).Where("id = ?", inbound.TlsId).Find(&inbound.Tls).Error
 			if err != nil {
@@ -471,5 +477,55 @@ func (s *InboundService) RestartInbounds(tx *gorm.DB, ids []uint) error {
 			return err
 		}
 	}
+	return nil
+}
+
+// inlineTlsName names the Tls record created from an inbound's inline tls.
+func inlineTlsName(tag string) string {
+	return tag + " (inline)"
+}
+
+// attachInlineTls stores an inline `tls` object sent on an inbound (no
+// tls_id) as a Tls record and points the inbound at it, so the core config,
+// links, JSON/Clash subscriptions and the hysteria2/anytls TLS requirement
+// all see the same TLS (issue #29). An edit reuses the record an earlier
+// inline save created for this inbound when nothing else references it;
+// otherwise a new record is created.
+func attachInlineTls(tx *gorm.DB, inbound *model.Inbound, act string) error {
+	record := util.InlineTlsRecord(inlineTlsName(inbound.Tag), inbound.InlineTls)
+	if record == nil {
+		return nil
+	}
+	if act == "edit" && inbound.Id > 0 {
+		var storedTlsId uint
+		if err := tx.Model(model.Inbound{}).Select("tls_id").Where("id = ?", inbound.Id).Scan(&storedTlsId).Error; err != nil {
+			return err
+		}
+		if storedTlsId > 0 {
+			var stored model.Tls
+			err := tx.Model(model.Tls{}).Where("id = ?", storedTlsId).First(&stored).Error
+			if err != nil && !database.IsNotFound(err) {
+				return err
+			}
+			if err == nil && strings.HasSuffix(stored.Name, " (inline)") {
+				var inboundRefs, serviceRefs int64
+				if err := tx.Model(model.Inbound{}).Where("tls_id = ? and id <> ?", storedTlsId, inbound.Id).Count(&inboundRefs).Error; err != nil {
+					return err
+				}
+				if err := tx.Model(model.Service{}).Where("tls_id = ?", storedTlsId).Count(&serviceRefs).Error; err != nil {
+					return err
+				}
+				if inboundRefs == 0 && serviceRefs == 0 {
+					record.Id = storedTlsId
+				}
+			}
+		}
+	}
+	if err := tx.Save(record).Error; err != nil {
+		return err
+	}
+	inbound.TlsId = record.Id
+	inbound.Tls = record
+	inbound.InlineTls = nil
 	return nil
 }

@@ -31,6 +31,11 @@ type Inbound struct {
 	// Foreign key to tls table
 	TlsId uint `json:"tls_id" form:"tls_id"`
 	Tls   *Tls `json:"tls" form:"tls" gorm:"foreignKey:TlsId;references:Id"`
+	// InlineTls is a sing-box server `tls` object sent directly on the
+	// inbound instead of a tls_id. It is never stored on the row:
+	// InboundService.Save turns it into a Tls record and fills TlsId, so the
+	// core, links and subscriptions all read the same TLS (issue #29).
+	InlineTls json.RawMessage `json:"-" form:"-" gorm:"-"`
 
 	Addrs json.RawMessage `json:"addrs" form:"addrs"`
 	// NodeId: NULL = this inbound runs on the local core; set = it is a
@@ -100,6 +105,10 @@ func (i *Inbound) UnmarshalJSON(data []byte) error {
 		i.TlsId = uint(val)
 	}
 	delete(raw, "tls_id")
+	i.InlineTls = nil
+	if inline, ok := raw["tls"].(map[string]interface{}); ok && len(inline) > 0 {
+		i.InlineTls, _ = json.Marshal(inline)
+	}
 	delete(raw, "tls")
 	delete(raw, "users")
 

@@ -26,6 +26,7 @@ API 根路径跟随面板 Web Path。例如面板为 `https://example.com/app/`�
 - `GET bootstrap`：面板资源、状态、管理员和设置首屏数据。
 - `GET resources/{inbounds|clients|outbounds|endpoints|services|tls|config|settings}`。
 - `POST resources/{resource}`：`action` 支持 `new`、`edit`、`del`、`set`、`addbulk`、`editbulk`、`delbulk`，`data` 为原生 JSON 值。Endpoint 资源可额外发送 `apply: false` 仅保存；省略或设为 `true` 时会在完整配置校验后同步应用，失败则恢复原运行配置。
+- inbounds 的 `new`/`edit` 可以直接在入站对象上写 sing-box 的 `tls` 对象而不传 `tls_id`：保存时会自动创建一条 TLS 记录（名称 `<tag> (inline)`）并回填 `tls_id`，内核、分享链接和 JSON/Clash 订阅使用同一份 TLS。Reality 的 `private_key`/`short_id` 保留在服务端，客户端 `public_key` 取请求中的值或由私钥推导。之后编辑时再次带内联 `tls` 会更新这条记录（仅当它没有被其它入站或服务引用）。
 - `del`（以及非 clients 资源的 `delbulk` 每一项）的 `data` 可以是标签/名称字符串、数字 id（数字或数字字符串）、或对象 `{id}` / `{tag}` / `{name}`；inbounds/outbounds/services/endpoints 按 tag，clients/tls/nodes 按 name。同名字符串优先匹配 tag/name，再按 id 匹配。找不到目标时返回 `404 {success:false}`，不会再返回 200。
 - `POST wireguard/export`：发送 `tag` 与从 0 开始的 `peerIndex`，返回受控生成的标准 WireGuard 客户端配置、名称和文件名。导出使用显式配置的 WireGuard UDP 地址，不使用管理面板域名。
 - `features` 中的 `wireguard-relay` 表示服务端支持分离监听、对端连接与运行时路由；`warp-egress` 表示可以通过 Endpoint 资源直接创建 Cloudflare WARP 出口。
