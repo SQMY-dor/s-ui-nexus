@@ -158,6 +158,24 @@ func (s *ClientService) Save(tx *gorm.DB, act string, data json.RawMessage, host
 		if err != nil {
 			return nil, err
 		}
+		if act == "edit" && client.Id != 0 {
+			// An edit that omits config or links keeps the stored values
+			// instead of wiping credentials or user-added external links.
+			var stored model.Client
+			if err = tx.Model(model.Client{}).Select("id", "config", "links").
+				Where("id = ?", client.Id).First(&stored).Error; err == nil {
+				if isEmptyJSON(client.Config) {
+					client.Config = stored.Config
+				}
+				if isEmptyJSON(client.Links) {
+					client.Links = stored.Links
+				}
+			}
+		}
+		err = normalizeClientPayload(&client)
+		if err != nil {
+			return nil, err
+		}
 		err = s.ensureClientSubId(tx, &client)
 		if err != nil {
 			return nil, err
@@ -192,6 +210,13 @@ func (s *ClientService) Save(tx *gorm.DB, act string, data json.RawMessage, host
 			return nil, common.NewError("bulk client list is empty")
 		}
 		for _, client := range clients {
+			if client == nil {
+				return nil, common.NewError("validation: bulk client list contains null")
+			}
+			err = normalizeClientPayload(client)
+			if err != nil {
+				return nil, err
+			}
 			err = s.ensureClientSubId(tx, client)
 			if err != nil {
 				return nil, err
@@ -219,12 +244,18 @@ func (s *ClientService) Save(tx *gorm.DB, act string, data json.RawMessage, host
 			return nil, common.NewError("bulk client list is empty")
 		}
 		for _, client := range clients {
+			if client == nil {
+				return nil, common.NewError("validation: bulk client list contains null")
+			}
 			err = s.ensureClientSubId(tx, client)
 			if err != nil {
 				return nil, err
 			}
 			changedInboundIds, err := s.findInboundsChanges(tx, client, true)
 			if err != nil {
+				return nil, err
+			}
+			if err = normalizeClientPayload(client); err != nil {
 				return nil, err
 			}
 			if len(changedInboundIds) > 0 {
@@ -288,6 +319,44 @@ func (s *ClientService) Save(tx *gorm.DB, act string, data json.RawMessage, host
 	}
 
 	return inboundIds, nil
+}
+
+// isEmptyJSON reports whether a raw JSON field was omitted, empty or null.
+func isEmptyJSON(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null"))
+}
+
+// normalizeClientPayload fills omitted optional client fields with their
+// empty values (links and inbounds as [], config as {}) and rejects fields
+// of the wrong JSON shape with an error that names the field, instead of
+// surfacing a bare "unexpected end of JSON input".
+func normalizeClientPayload(client *model.Client) error {
+	if isEmptyJSON(client.Links) {
+		client.Links = json.RawMessage("[]")
+	} else {
+		var links []map[string]string
+		if err := json.Unmarshal(client.Links, &links); err != nil {
+			return common.NewErrorf("validation: links must be a JSON array of {remark,type,uri}: %v", err)
+		}
+	}
+	if isEmptyJSON(client.Inbounds) {
+		client.Inbounds = json.RawMessage("[]")
+	} else {
+		var ids []uint
+		if err := json.Unmarshal(client.Inbounds, &ids); err != nil {
+			return common.NewErrorf("validation: inbounds must be a JSON array of inbound ids: %v", err)
+		}
+	}
+	if isEmptyJSON(client.Config) {
+		client.Config = json.RawMessage("{}")
+	} else {
+		var config map[string]json.RawMessage
+		if err := json.Unmarshal(client.Config, &config); err != nil {
+			return common.NewErrorf("validation: config must be a JSON object: %v", err)
+		}
+	}
+	return nil
 }
 
 func (s *ClientService) updateLinksWithFixedInbounds(tx *gorm.DB, clients []*model.Client, hostname string) error {
@@ -357,9 +426,11 @@ func (s *ClientService) updateLinksWithFixedInbounds(tx *gorm.DB, clients []*mod
 
 	for index, client := range clients {
 		var clientLinks []map[string]string
-		err = json.Unmarshal(client.Links, &clientLinks)
-		if err != nil {
-			return err
+		if !isEmptyJSON(client.Links) {
+			err = json.Unmarshal(client.Links, &clientLinks)
+			if err != nil {
+				return common.NewErrorf("validation: links must be a JSON array of {remark,type,uri}: %v", err)
+			}
 		}
 
 		newClientLinks := []map[string]string{}
