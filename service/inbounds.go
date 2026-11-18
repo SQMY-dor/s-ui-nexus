@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/felixbennettio/s-ui-next/database"
@@ -85,9 +86,10 @@ func (s *InboundService) GetAll() (*[]map[string]interface{}, error) {
 				json.Unmarshal(restFields["managed"], &ss_managed)
 			}
 		}
-		if s.hasUser(inbound.Type) &&
-			!(inbound.Type == "shadowtls" && shadowtls_version < 3) &&
-			!(inbound.Type == "shadowsocks" && ss_managed) {
+		// The list's "users" key is present exactly when the inbound takes
+		// users: a master adopting from this panel reads it that way
+		// (nodeInboundTakesUsers), so it must stay on takesUsers.
+		if takesUsers(inbound.Type, int(shadowtls_version), ss_managed) {
 			users := []string{}
 			err = db.Raw("SELECT clients.name FROM clients, json_each(clients.inbounds) as je WHERE je.value = ?", inbound.Id).Scan(&users).Error
 			if err != nil {
@@ -314,7 +316,29 @@ func (s *InboundService) hasUser(inboundType string) bool {
 	return false
 }
 
-func (s *InboundService) fetchUsers(db *gorm.DB, inboundType string, condition string, inbound map[string]interface{}) ([]json.RawMessage, error) {
+// takesUsers is the one rule for whether an inbound carries a per-client user
+// list, so whether clients can be bound to it at all: a type with users,
+// shadowtls only from v3, and no managed shadowsocks (its users live outside
+// the panel). The inbounds list (GetAll) decides by it, and so, through that
+// list, does a master adopting from this panel. Ported from shenaba/2s-ui
+// (GPL-3.0) #300.
+func takesUsers(inboundType string, shadowtlsVersion int, ssManaged bool) bool {
+	if !(&InboundService{}).hasUser(inboundType) {
+		return false
+	}
+	switch inboundType {
+	case "shadowtls":
+		return shadowtlsVersion >= 3
+	case "shadowsocks":
+		return !ssManaged
+	}
+	return true
+}
+
+// fetchUsers collects the per-client config for one inbound type. condition is
+// a WHERE fragment and args are its placeholders -- callers must not build
+// values into the fragment, since one of them comes from a request.
+func (s *InboundService) fetchUsers(db *gorm.DB, inboundType string, condition string, inbound map[string]interface{}, args ...interface{}) ([]json.RawMessage, error) {
 	if inboundType == "shadowtls" {
 		version, _ := inbound["version"].(float64)
 		if int(version) < 3 {
@@ -333,7 +357,7 @@ func (s *InboundService) fetchUsers(db *gorm.DB, inboundType string, condition s
 	err := db.Raw(
 		fmt.Sprintf(`SELECT json_extract(clients.config, "$.%s")
 		FROM clients WHERE enable = true AND %s`,
-			inboundType, condition)).Scan(&users).Error
+			inboundType, condition), args...).Scan(&users).Error
 	if err != nil {
 		return nil, err
 	}
@@ -358,8 +382,7 @@ func (s *InboundService) addUsers(db *gorm.DB, inboundJson []byte, inboundId uin
 		return nil, err
 	}
 
-	condition := fmt.Sprintf("%d IN (SELECT json_each.value FROM json_each(clients.inbounds))", inboundId)
-	inbound["users"], err = s.fetchUsers(db, inboundType, condition, inbound)
+	inbound["users"], err = s.fetchUsers(db, inboundType, "? IN (SELECT json_each.value FROM json_each(clients.inbounds))", inbound, inboundId)
 	if err != nil {
 		return nil, err
 	}
@@ -367,8 +390,29 @@ func (s *InboundService) addUsers(db *gorm.DB, inboundJson []byte, inboundId uin
 	return json.Marshal(inbound)
 }
 
+// parseClientIds parses the comma-separated initUsers request field. Empty
+// parts are skipped; anything else that is not an id is refused.
+func parseClientIds(raw string) ([]uint, error) {
+	var ids []uint
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		id, err := strconv.ParseUint(part, 10, 32)
+		if err != nil {
+			return nil, common.NewErrorf("invalid client id %q", part)
+		}
+		ids = append(ids, uint(id))
+	}
+	return ids, nil
+}
+
 func (s *InboundService) initUsers(db *gorm.DB, inboundJson []byte, clientIds string, inboundType string) ([]byte, error) {
-	ClientIds := strings.Split(clientIds, ",")
+	ClientIds, err := parseClientIds(clientIds)
+	if err != nil {
+		return nil, err
+	}
 	if len(ClientIds) == 0 {
 		return inboundJson, nil
 	}
@@ -378,13 +422,16 @@ func (s *InboundService) initUsers(db *gorm.DB, inboundJson []byte, clientIds st
 	}
 
 	var inbound map[string]interface{}
-	err := json.Unmarshal(inboundJson, &inbound)
+	err = json.Unmarshal(inboundJson, &inbound)
 	if err != nil {
 		return nil, err
 	}
 
-	condition := fmt.Sprintf("id IN (%s)", strings.Join(ClientIds, ","))
-	inbound["users"], err = s.fetchUsers(db, inboundType, condition, inbound)
+	// The same clients AddInboundsToClients binds, or the core would serve a
+	// @cluster client whose row never gets the inbound. Ids are bound as
+	// placeholders: the list comes from the request (it used to be pasted into
+	// the SQL).
+	inbound["users"], err = s.fetchUsers(db, inboundType, "id IN ? AND "+bindableClientsWhere, inbound, ClientIds, clusterGroup)
 	if err != nil {
 		return nil, err
 	}

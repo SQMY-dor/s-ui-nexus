@@ -218,7 +218,7 @@ func TestClusterNodeLifecycle(t *testing.T) {
 	if err != nil || len(list) != 1 || list[0].Adopted {
 		t.Fatalf("FetchNodeInbounds = %v, %v", list, err)
 	}
-	if err := ns.AdoptInbounds(node.Id, []string{"vless-node"}, "admin"); err != nil {
+	if err := ns.AdoptInbounds(node.Id, []string{"vless-node"}, "", "admin"); err != nil {
 		t.Fatalf("adopt: %v", err)
 	}
 	var replica model.Inbound
@@ -228,7 +228,7 @@ func TestClusterNodeLifecycle(t *testing.T) {
 	if replica.NodeId == nil || *replica.NodeId != node.Id || replica.TlsId != 0 {
 		t.Fatalf("replica row = %+v", replica)
 	}
-	if err := ns.AdoptInbounds(node.Id, []string{"vless-node"}, "admin"); err == nil {
+	if err := ns.AdoptInbounds(node.Id, []string{"vless-node"}, "", "admin"); err == nil {
 		t.Fatal("re-adopting an existing tag must fail loudly")
 	}
 
