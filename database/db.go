@@ -113,8 +113,13 @@ func InitDB(dbPath string) error {
 		&model.Stats{},
 		&model.Client{},
 		&model.Changes{},
+		&model.Node{},
 	)
 	if err != nil {
+		return err
+	}
+	// auto-https (ported from shenaba/2s-ui): certs table
+	if err = migrateCertTables(db); err != nil {
 		return err
 	}
 	err = initUser()

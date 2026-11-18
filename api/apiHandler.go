@@ -39,6 +39,10 @@ func (a *APIHandler) initRouter(g *gin.RouterGroup) {
 func (a *APIHandler) postHandler(c *gin.Context) {
 	loginUser := GetLoginUser(c)
 	action := c.Param("postAction")
+	// auto-https (ported from shenaba/2s-ui): domains & certificates
+	if handleCertPost(c, action) {
+		return
+	}
 
 	switch action {
 	case "login":
@@ -59,7 +63,14 @@ func (a *APIHandler) postHandler(c *gin.Context) {
 		a.ApiService.ChangePass(c)
 		a.apiv2.ReloadTokens()
 	case "save":
-		a.ApiService.Save(c, loginUser)
+		// The web UI always fans client/inbound changes out to cluster nodes.
+		a.ApiService.Save(c, loginUser, true)
+	case "testNode":
+		a.ApiService.TestNode(c)
+	case "adoptInbounds":
+		a.ApiService.AdoptInbounds(c, loginUser)
+	case "reconcileNode":
+		a.ApiService.ReconcileNode(c)
 	case "wireguardSecret":
 		a.ApiService.CopyWireGuardSecret(c)
 	case "wireguardExport":
@@ -87,6 +98,10 @@ func (a *APIHandler) postHandler(c *gin.Context) {
 
 func (a *APIHandler) getHandler(c *gin.Context) {
 	action := c.Param("getAction")
+	// auto-https (ported from shenaba/2s-ui): domains & certificates
+	if handleCertGet(c, action) {
+		return
+	}
 
 	switch action {
 	case "logout":
@@ -109,12 +124,14 @@ func (a *APIHandler) getHandler(c *gin.Context) {
 		a.ApiService.PasskeyLoginBegin(c)
 	case "load":
 		a.ApiService.LoadData(c)
-	case "inbounds", "outbounds", "endpoints", "services", "tls", "clients", "config":
+	case "inbounds", "outbounds", "endpoints", "services", "tls", "clients", "config", "nodes":
 		err := a.ApiService.LoadPartialData(c, []string{action})
 		if err != nil {
 			jsonMsg(c, action, err)
 		}
 		return
+	case "nodeInbounds":
+		a.ApiService.GetNodeInbounds(c)
 	case "users":
 		a.ApiService.GetUsers(c)
 	case "settings":

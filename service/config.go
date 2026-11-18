@@ -36,6 +36,7 @@ type ConfigService struct {
 	OutboundService
 	ServicesService
 	EndpointService
+	NodeService
 }
 
 type SingBoxConfig struct {
@@ -335,6 +336,15 @@ func (s *ConfigService) SaveWithApply(obj string, act string, data json.RawMessa
 		err = s.ServicesService.Save(tx, act, data)
 	case "settings":
 		err = s.SettingService.Save(tx, data)
+	case "nodes":
+		// Cluster nodes (ported from shenaba/2s-ui). A rename rewrites the
+		// "[node] " link prefix and a delete removes the node's replica
+		// inbounds, so both can change clients and inbounds too. The token is
+		// redacted from the changes row by redactChangeData below.
+		err = s.NodeService.Save(tx, act, data)
+		if act != "new" {
+			objs = append(objs, "clients", "inbounds")
+		}
 	default:
 		return nil, common.NewError("unknown object: ", obj)
 	}

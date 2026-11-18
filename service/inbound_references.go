@@ -205,7 +205,9 @@ func renameInboundReferences(tx *gorm.DB, oldTag, newTag string) (bool, error) {
 
 func reconcileInboundReferences(tx *gorm.DB) (bool, error) {
 	var tags, endpoints []string
-	if err := tx.Model(&model.Inbound{}).Pluck("tag", &tags).Error; err != nil {
+	// Cluster replicas never run on the local core, so a route reference to
+	// one is as dangling as a reference to a deleted inbound.
+	if err := tx.Model(&model.Inbound{}).Where("node_id IS NULL").Pluck("tag", &tags).Error; err != nil {
 		return false, err
 	}
 	if err := tx.Model(&model.Endpoint{}).Pluck("tag", &endpoints).Error; err != nil {

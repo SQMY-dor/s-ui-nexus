@@ -353,6 +353,9 @@ func (a *APIv3Handler) resourceValue(resource, id string) (interface{}, error) {
 		return a.TlsService.GetAll()
 	case "settings":
 		return a.SettingService.GetAllSetting()
+	case "nodes":
+		// Cluster nodes; the token is never returned (tokenSet flag only).
+		return a.NodeService.GetAllWithStatus()
 	case "config":
 		value, err := a.SettingService.GetConfig()
 		if err != nil {
@@ -411,6 +414,15 @@ func (a *APIv3Handler) saveResource(c *gin.Context) {
 
 // A failed list refresh must not turn a committed mutation into a save error.
 func (a *APIv3Handler) resourceSaveResult(c *gin.Context, changed []string, processed *int) {
+	// Like the web UI, an app-side client/inbound change fans out to cluster
+	// nodes immediately instead of waiting for the hourly reconcile.
+	for _, name := range changed {
+		if name == "clients" || name == "inbounds" {
+			a.NodeSyncService.MarkAllDirty()
+			go a.NodeSyncService.ReconcileDirtyOnline()
+			break
+		}
+	}
 	result := make(map[string]interface{}, len(changed))
 	warning := ""
 	for _, name := range changed {
