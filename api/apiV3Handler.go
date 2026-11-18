@@ -396,6 +396,14 @@ func (a *APIv3Handler) saveResource(c *gin.Context) {
 		a.saveResourceBulk(c, resource, body)
 		return
 	}
+	if body.Action == "del" {
+		target, status, err := resolveV3DeleteTarget(resource, body.Data)
+		if err != nil {
+			v3Error(c, status, err)
+			return
+		}
+		body.Data = target
+	}
 	initUsers := make([]string, 0, len(body.InitUsers))
 	for _, id := range body.InitUsers {
 		initUsers = append(initUsers, strconv.FormatUint(uint64(id), 10))
@@ -443,6 +451,21 @@ func (a *APIv3Handler) resourceSaveResult(c *gin.Context, changed []string, proc
 	v3OK(c, data)
 }
 
+// resolveV3DeleteTarget accepts a delete target as a tag/name string, a
+// numeric id (number or numeric string) or an object {id} / {tag} / {name},
+// and returns the payload the resource's del expects. Nothing matching is a
+// 404, so automation does not mistake a no-op for a delete.
+func resolveV3DeleteTarget(resource string, data json.RawMessage) (json.RawMessage, int, error) {
+	target, err := service.ResolveDeleteTarget(database.GetDB(), resource, data)
+	if errors.Is(err, service.ErrResourceNotFound) {
+		return nil, http.StatusNotFound, common.NewErrorf("%s: %s not found", resource, strings.TrimSpace(string(data)))
+	}
+	if err != nil {
+		return nil, http.StatusBadRequest, err
+	}
+	return target, http.StatusOK, nil
+}
+
 func (a *APIv3Handler) saveResourceBulk(c *gin.Context, resource string, body resourceMutation) {
 	var items []json.RawMessage
 	if err := json.Unmarshal(body.Data, &items); err != nil {
@@ -460,6 +483,14 @@ func (a *APIv3Handler) saveResourceBulk(c *gin.Context, resource string, body re
 	changed := []string{resource}
 	seen := map[string]bool{resource: true}
 	for index, item := range items {
+		if action == "del" {
+			target, status, err := resolveV3DeleteTarget(resource, item)
+			if err != nil {
+				v3Error(c, status, common.NewErrorf("bulk item %d failed: %v", index+1, err))
+				return
+			}
+			item = target
+		}
 		apply := true
 		if body.Apply != nil {
 			apply = *body.Apply
