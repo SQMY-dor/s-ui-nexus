@@ -170,7 +170,7 @@ jobs:
 
       - name: Audit dependencies
         working-directory: frontend
-        run: npm audit --audit-level=high
+        run: npm run audit:ci
 
   android-arm64:
     name: Check Android arm64
