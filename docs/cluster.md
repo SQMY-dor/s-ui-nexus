@@ -61,7 +61,12 @@
 
 ## 订阅合并
 
-- reconcile 时，主面板根据副本入站的 `out_json`/`addrs` 快照和用户凭据，在本地为每个用户生成节点链接，以 `external` 类型、备注 `[节点名] 入站标签` 合并进 `client.links`，订阅（普通 / JSON / Clash）自动包含这些链接。
+- reconcile 时，主面板根据副本入站的 `out_json`/`addrs` 快照和用户凭据，在本地为每个用户生成节点链接，以 `external` 类型、备注 `[节点名] 入站标签` 合并进 `client.links`。服务器地址取节点快照里的地址（与链接式订阅一致）。
+- 凭据取自主面板用户的 `config`：socks/http/mixed 副本按节点实际鉴权使用的条目生成（mixed 入站用 `config.mixed`，缺失时回退 `socks`/`http`，反之亦然），不会再生成 `socks5://:@…` 这种空凭据链接。已有的空凭据快照会在下一次 reconcile（保存该用户或节点、手动 `reconcileNode`，或每小时兜底）时被重写。
+- 三种订阅格式包含同一组节点：
+  - 普通（base64 链接）：直接输出本地链接 + `external` 链接；
+  - `?format=json`（sing-box）：本地入站按 `out_json` 生成 outbound（仍只取 `node_id IS NULL`，避免重复），节点副本通过上述 `external` 链接转换为 outbound，标签为链接备注 `[节点名] 入站标签`（多条时加序号前缀）；
+  - `?format=clash`：同 JSON，再转换为 Clash 代理。socks5:// / http(s):// 链接现在可以被转换（此前转换器不支持这两种协议，节点的 mixed/socks/http 副本因此被丢弃）。
 - 修改用户时，节点链接从数据库中保留（只要该副本仍绑定在用户上），不会被旧页面的表单覆盖。
 - 节点改名会把所有 `[旧名] ` 前缀改写为 `[新名] `。
 

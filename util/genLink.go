@@ -171,13 +171,16 @@ func LinkGenerator(clientConfig json.RawMessage, i *model.Inbound, hostname stri
 
 	switch i.Type {
 	case "socks":
-		return socksLink(userConfig["socks"], Addrs)
+		return socksLink(proxyUserConfig(userConfig, "socks", "mixed"), Addrs)
 	case "http":
-		return httpLink(userConfig["http"], Addrs)
+		return httpLink(proxyUserConfig(userConfig, "http", "mixed"), Addrs)
 	case "mixed":
+		// A mixed inbound authenticates with the client's "mixed" entry
+		// (InboundService.fetchUsers reads config.<inbound type>); clients
+		// created through the API often carry only that one (issue #30).
 		return append(
-			socksLink(userConfig["socks"], Addrs),
-			httpLink(userConfig["http"], Addrs)...,
+			socksLink(proxyUserConfig(userConfig, "mixed", "socks"), Addrs),
+			httpLink(proxyUserConfig(userConfig, "mixed", "http"), Addrs)...,
 		)
 	case "shadowsocks":
 		return shadowsocksLink(userConfig, *inbound, Addrs)
@@ -251,6 +254,23 @@ func prepareTls(t *model.Tls) map[string]interface{} {
 		}
 	}
 	return oTls
+}
+
+// proxyUserConfig returns the first of the client's per-protocol entries
+// that carries a username, so socks/http/mixed links are never generated
+// with empty credentials while another entry has them.
+func proxyUserConfig(userConfig map[string]map[string]interface{}, keys ...string) map[string]interface{} {
+	for _, key := range keys {
+		if entry := userConfig[key]; entry != nil {
+			if username, _ := entry["username"].(string); username != "" {
+				return entry
+			}
+		}
+	}
+	if len(keys) > 0 {
+		return userConfig[keys[0]]
+	}
+	return nil
 }
 
 func socksLink(userConfig map[string]interface{}, addrs []map[string]interface{}) []string {
