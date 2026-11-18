@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/felixbennettio/s-ui-next/logger"
+	"github.com/felixbennettio/s-ui-next/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -80,12 +81,44 @@ func pureJsonMsg(c *gin.Context, success bool, msg string) {
 	}
 }
 
+// isAPIRequestPath reports whether path is one of the panel's JSON API
+// routes (<base>api/..., <base>apiv2/..., <base>apiv3/...).
+func isAPIRequestPath(path string) bool {
+	for _, segment := range strings.Split(path, "/") {
+		switch segment {
+		case "api", "apiv2", "apiv3":
+			return true
+		}
+	}
+	return false
+}
+
+// loginRedirectPath returns the panel login page under the configured web
+// path, e.g. /app/login, instead of a hard-coded /login that 404s when the
+// panel is not served from the root.
+func loginRedirectPath() string {
+	settingService := service.SettingService{}
+	basePath, err := settingService.GetWebPath()
+	if err != nil || basePath == "" {
+		basePath = "/"
+	}
+	if !strings.HasSuffix(basePath, "/") {
+		basePath += "/"
+	}
+	return basePath + "login"
+}
+
 func checkLogin(c *gin.Context) {
 	if !IsLogin(c) {
-		if c.GetHeader("X-Requested-With") == "XMLHttpRequest" {
+		switch {
+		case c.GetHeader("X-Requested-With") == "XMLHttpRequest":
+			// The Web panel's axios client checks for this exact 200 body and
+			// then logs out; keep it so the panel's login redirect still works.
 			pureJsonMsg(c, false, "Invalid login")
-		} else {
-			c.Redirect(http.StatusTemporaryRedirect, "/login")
+		case isAPIRequestPath(c.Request.URL.Path):
+			c.JSON(http.StatusUnauthorized, Msg{Success: false, Msg: "Invalid login"})
+		default:
+			c.Redirect(http.StatusTemporaryRedirect, loginRedirectPath())
 		}
 		c.Abort()
 	} else {

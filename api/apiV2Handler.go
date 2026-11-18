@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -150,7 +151,7 @@ func (a *APIv2Handler) checkToken(c *gin.Context) {
 		c.Next()
 		return
 	}
-	jsonMsg(c, "", common.NewError("invalid token"))
+	c.JSON(http.StatusUnauthorized, Msg{Success: false, Msg: "invalid token"})
 	c.Abort()
 }
 
