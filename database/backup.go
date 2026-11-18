@@ -110,7 +110,12 @@ func GetDb(exclude string) ([]byte, error) {
 	if err := db.Model(&model.Inbound{}).Scan(&inbound).Error; err != nil {
 		return nil, err
 	} else if len(inbound) > 0 {
+		// Taken before the insert, which reads the default back into the rows.
+		off := disabledIds(inbound, func(r model.Inbound) (uint, bool) { return r.Id, r.Enable })
 		if err := backupDb.Save(inbound).Error; err != nil {
+			return nil, err
+		}
+		if err := keepDisabled(backupDb, &model.Inbound{}, off); err != nil {
 			return nil, err
 		}
 	}
@@ -176,7 +181,11 @@ func GetDb(exclude string) ([]byte, error) {
 	if err := db.Model(&model.Node{}).Scan(&nodes).Error; err != nil {
 		return nil, err
 	} else if len(nodes) > 0 {
+		off := disabledIds(nodes, func(r model.Node) (uint, bool) { return r.Id, r.Enable })
 		if err := backupDb.Save(nodes).Error; err != nil {
+			return nil, err
+		}
+		if err := keepDisabled(backupDb, &model.Node{}, off); err != nil {
 			return nil, err
 		}
 	}
@@ -425,5 +434,32 @@ func SendSighup() error {
 			logger.Error("send signal SIGHUP failed:", signalErr)
 		}
 	}()
+	return nil
+}
+
+// disabledIds lists the ids of the switched-off rows, read before an insert
+// that would overwrite Enable with the column default.
+func disabledIds[T any](rows []T, read func(T) (uint, bool)) []uint {
+	var off []uint
+	for _, row := range rows {
+		if id, enable := read(row); !enable {
+			off = append(off, id)
+		}
+	}
+	return off
+}
+
+// keepDisabled writes enable=false back onto rows an insert switched on. The
+// column defaults to true, and gorm leaves a false value that has a default out
+// of an insert, so every switched-off inbound or node came back switched on
+// from a backup. Ported from shenaba/2s-ui (GPL-3.0).
+func keepDisabled(tx *gorm.DB, table any, ids []uint) error {
+	const batch = 500
+	for start := 0; start < len(ids); start += batch {
+		end := min(start+batch, len(ids))
+		if err := tx.Model(table).Where("id IN ?", ids[start:end]).Update("enable", false).Error; err != nil {
+			return err
+		}
+	}
 	return nil
 }

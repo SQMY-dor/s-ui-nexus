@@ -58,6 +58,7 @@ func (s *InboundService) GetAll() (*[]map[string]interface{}, error) {
 			"id":     inbound.Id,
 			"type":   inbound.Type,
 			"tag":    inbound.Tag,
+			"enable": inbound.Enable,
 			"tls_id": inbound.TlsId,
 		}
 		if inbound.NodeId != nil {
@@ -127,9 +128,12 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			}
 		}
 		var oldTag string
+		// Whether the core holds the stored inbound: a disabled one is not in
+		// it, so there is nothing to replace or remove.
+		oldRunning := false
 		if act == "edit" {
 			var old model.Inbound
-			err = tx.Model(model.Inbound{}).Select("tag", "node_id").Where("id = ?", inbound.Id).Find(&old).Error
+			err = tx.Model(model.Inbound{}).Select("tag", "node_id", "enable").Where("id = ?", inbound.Id).Find(&old).Error
 			if err != nil {
 				return err
 			}
@@ -137,33 +141,54 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 				return common.NewError("inbound belongs to a cluster node: manage it on the node panel")
 			}
 			oldTag = old.Tag
+			oldRunning = old.Enable
+			// An edit that does not say keeps what is stored. Read as "on" --
+			// the default a new inbound gets -- a caller that predates the
+			// switch, or a form that rebuilt the object, would turn a disabled
+			// inbound back on.
+			if !inbound.EnableSet {
+				inbound.Enable = old.Enable
+			}
+		}
+		err = checkInboundDetour(tx, &inbound, oldTag)
+		if err != nil {
+			return err
 		}
 
 		if corePtr.IsRunning() {
-			if act == "edit" {
+			if act == "edit" && oldRunning {
 				err = corePtr.RemoveInbound(oldTag)
 				if err != nil && err != os.ErrInvalid {
 					return err
 				}
+				// Switched off: closing the listener leaves the connections
+				// it accepted open.
+				if !inbound.Enable {
+					if box := corePtr.GetInstance(); box != nil {
+						box.ConnTracker().CloseConnByInbound(oldTag)
+					}
+				}
 			}
 
-			inboundConfig, err := inbound.MarshalJSON()
-			if err != nil {
-				return err
-			}
+			if inbound.Enable {
+				inboundConfig, err := inbound.MarshalJSON()
+				if err != nil {
+					return err
+				}
 
-			if act == "edit" {
-				inboundConfig, err = s.addUsers(tx, inboundConfig, inbound.Id, inbound.Type)
-			} else {
-				inboundConfig, err = s.initUsers(tx, inboundConfig, initUserIds, inbound.Type)
-			}
-			if err != nil {
-				return err
-			}
+				if act == "edit" {
+					inboundConfig, err = s.addUsers(tx, inboundConfig, inbound.Id, inbound.Type)
+				} else {
+					inboundConfig, err = s.initUsers(tx, inboundConfig, initUserIds, inbound.Type)
+				}
+				if err != nil {
+					return err
+				}
 
-			err = corePtr.AddInbound(inboundConfig)
-			if err != nil {
-				return err
+				err = corePtr.AddInbound(inboundConfig)
+				if err != nil {
+					return err
+				}
 			}
 		}
 
@@ -246,8 +271,9 @@ func (s *InboundService) GetAllConfig(db *gorm.DB) ([]json.RawMessage, error) {
 	var inboundsJson []json.RawMessage
 	var inbounds []*model.Inbound
 	// node_id IS NULL: replicas of remote cluster inbounds must never reach
-	// the local core; their ports live on other machines.
-	err := db.Model(model.Inbound{}).Preload("Tls").Where("node_id IS NULL").Find(&inbounds).Error
+	// the local core; their ports live on other machines. A disabled inbound
+	// stays out too.
+	err := db.Model(model.Inbound{}).Preload("Tls").Where("node_id IS NULL AND enable = ?", true).Find(&inbounds).Error
 	if err != nil {
 		return nil, err
 	}
@@ -356,7 +382,9 @@ func (s *InboundService) RestartInbounds(tx *gorm.DB, ids []uint) error {
 		return nil
 	}
 	var inbounds []*model.Inbound
-	err := tx.Model(model.Inbound{}).Preload("Tls").Where("id in ?", ids).Where("node_id IS NULL").Find(&inbounds).Error
+	// Not a disabled inbound either: re-adding it here (a client or TLS edit)
+	// would switch it back on.
+	err := tx.Model(model.Inbound{}).Preload("Tls").Where("id in ?", ids).Where("node_id IS NULL AND enable = ?", true).Find(&inbounds).Error
 	if err != nil {
 		return err
 	}

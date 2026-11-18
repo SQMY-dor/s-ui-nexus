@@ -364,7 +364,7 @@ func (s *ClientService) updateLinksWithFixedInbounds(tx *gorm.DB, clients []*mod
 
 		newClientLinks := []map[string]string{}
 		for _, inbound := range inbounds {
-			newLinks := util.LinkGenerator(client.Config, &inbound, hostname)
+			newLinks := inboundLinks(client.Config, &inbound, hostname)
 			for _, newLink := range newLinks {
 				newClientLinks = append(newClientLinks, map[string]string{
 					"remark": inbound.Tag,
@@ -437,7 +437,7 @@ func (s *ClientService) UpdateClientsOnInboundAdd(tx *gorm.DB, initIds string, i
 		// Add links
 		var clientLinks, newClientLinks []map[string]string
 		json.Unmarshal(client.Links, &clientLinks)
-		newLinks := util.LinkGenerator(client.Config, &inbound, hostname)
+		newLinks := inboundLinks(client.Config, &inbound, hostname)
 		for _, newLink := range newLinks {
 			newClientLinks = append(newClientLinks, map[string]string{
 				"remark": inbound.Tag,
@@ -539,7 +539,7 @@ func (s *ClientService) UpdateLinksByInboundChange(tx *gorm.DB, inbounds *[]mode
 		for _, client := range clients {
 			var clientLinks, newClientLinks []map[string]string
 			json.Unmarshal(client.Links, &clientLinks)
-			newLinks := util.LinkGenerator(client.Config, &inbound, hostname)
+			newLinks := inboundLinks(client.Config, &inbound, hostname)
 			for _, newLink := range newLinks {
 				newClientLinks = append(newClientLinks, map[string]string{
 					"remark": inbound.Tag,
@@ -564,6 +564,20 @@ func (s *ClientService) UpdateLinksByInboundChange(tx *gorm.DB, inbounds *[]mode
 		}
 	}
 	return nil
+}
+
+// inboundLinks is a client's share links for one local inbound: none for a
+// disabled one. Every stored local link is built through here, and each
+// rebuild drops the local links it no longer returns, so switching an inbound
+// off takes its links out of every subscription and switching it back on
+// brings them back. The gate is here rather than in util.LinkGenerator, where
+// every Inbound literal -- enable being false at its zero value -- would read
+// as switched off. Ported from shenaba/2s-ui (GPL-3.0).
+func inboundLinks(config json.RawMessage, inbound *model.Inbound, hostname string) []string {
+	if !inbound.Enable {
+		return nil
+	}
+	return util.LinkGenerator(config, inbound, hostname)
 }
 
 func (s *ClientService) DepleteClients() (inboundIds []uint, err error) {
