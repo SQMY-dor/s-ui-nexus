@@ -16,9 +16,8 @@ class ApiException implements Exception {
 }
 
 class ApiClient {
-  ApiClient(ConnectionProfile profile, {String localeCode = 'en'})
+  ApiClient(ConnectionProfile profile, {this._localeCode = 'en'})
       : _profile = profile,
-        _localeCode = localeCode,
         _dio = Dio(
           BaseOptions(
             baseUrl: profile.apiBaseUrl,
