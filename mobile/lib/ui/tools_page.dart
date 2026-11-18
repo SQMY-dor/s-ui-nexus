@@ -72,8 +72,8 @@ class _ToolsPageState extends State<ToolsPage> {
   }
 
   Future<void> restoreDatabase() async {
-    final result = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: const ['db']);
-    final path = result?.files.single.path;
+    final picked = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: const ['db']);
+    final path = picked?.path;
     if (path == null) return;
     if (!mounted || !await confirm(context, title: context.tr('tools.restoreDatabase'), message: context.tr('tools.restoreConfirm'), action: context.tr('tools.restoreDatabase'))) return;
     if (!mounted) return;

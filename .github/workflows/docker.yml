@@ -19,11 +19,11 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v7.0.1
         with:
           submodules: recursive
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 25
       - name: Install dependencies and build frontend
@@ -52,7 +52,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v7.0.1
       - name: Download frontend build artifact
         uses: actions/download-artifact@v8
         with:
@@ -66,7 +66,7 @@ jobs:
 
       - name: Set up Go for cross compilation
         if: matrix.cross
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           cache: false
           go-version-file: go.mod
@@ -98,7 +98,7 @@ jobs:
 
       - name: Restore Cronet cross toolchain
         if: matrix.cross
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/cronet-go/naiveproxy/src/third_party/llvm-build/
@@ -150,7 +150,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
       - name: Cache Docker layers
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: /tmp/.buildx-cache
           key: ${{ runner.os }}-buildx-${{ matrix.platform }}-${{ github.sha }}
