@@ -219,7 +219,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<dynamic> getResource(String resource, {String? id}) {
-    return api!.get('resources/$resource', query: {if (id != null) 'id': id});
+    return api!.get('resources/$resource', query: {'id': ?id});
   }
 
   Future<SaveResult> saveResource(
