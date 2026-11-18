@@ -370,7 +370,7 @@ func hysteriaLink(
 			params = append(params, LinkParam{"auth", auth})
 		}
 		if tls, ok := addr["tls"].(map[string]interface{}); ok {
-			getTlsParams(&params, tls, "insecure")
+			getTlsParams(&params, quicLinkTls(tls), "insecure")
 		}
 		if obfs, ok := inbound["obfs"].(string); ok {
 			params = append(params, LinkParam{"obfs", obfs})
@@ -413,7 +413,7 @@ func hysteria2Link(
 			params = append(params, LinkParam{"upmbps", fmt.Sprintf("%.0f", downmbps)})
 		}
 		if tls, ok := addr["tls"].(map[string]interface{}); ok {
-			getTlsParams(&params, tls, "insecure")
+			getTlsParams(&params, quicLinkTls(tls), "insecure")
 		}
 		if obfs, ok := inbound["obfs"].(map[string]interface{}); ok {
 			if obfsType, ok := obfs["type"].(string); ok {
@@ -478,7 +478,7 @@ func tuicLink(
 	for _, addr := range addrs {
 		var params []LinkParam
 		if tls, ok := addr["tls"].(map[string]interface{}); ok {
-			getTlsParams(&params, tls, "insecure")
+			getTlsParams(&params, quicLinkTls(tls), "insecure")
 		}
 		if congestionControl, ok := inbound["congestion_control"].(string); ok {
 			params = append(params, LinkParam{"congestion_control", congestionControl})

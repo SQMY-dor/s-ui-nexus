@@ -172,6 +172,9 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 		if err != nil {
 			return nil, nil, err
 		}
+		// Stored out_json may predate dropping uTLS from QUIC protocols, which
+		// a sing-box client refuses outright on them (shenaba/2s-ui #310).
+		util.StripQuicOutboundTls(outbound)
 		tag, _ := outbound["tag"].(string)
 		if len(addrs) == 0 {
 			// For mixed protocol, use separated socks and http
@@ -206,6 +209,8 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 					}
 					newOut["tls"] = outTls
 				}
+				// An address's TLS override may carry uTLS too.
+				util.StripQuicOutboundTls(newOut)
 				// After the override: an address's own server_name is its Host.
 				applyDefaultHost(newOut)
 
