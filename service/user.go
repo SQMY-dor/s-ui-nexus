@@ -132,13 +132,13 @@ func (s *UserService) CheckPassword(username string, password string, remoteIP s
 		Error
 	if database.IsNotFound(err) {
 		_ = verifyPassword(dummyPasswordHash, password)
-		return nil, common.NewError("wrong user or password! IP: ", remoteIP)
+		return nil, common.NewErrorf("wrong user or password (IP: %s)", remoteIP)
 	} else if err != nil {
 		logger.Warning("check user err:", err, " IP: ", remoteIP)
 		return nil, err
 	}
 	if !verifyPassword(user.Password, password) {
-		return nil, common.NewError("wrong user or password! IP: ", remoteIP)
+		return nil, common.NewErrorf("wrong user or password (IP: %s)", remoteIP)
 	}
 	if !strings.HasPrefix(user.Password, "$2") {
 		if hashed, hashErr := hashPassword(password); hashErr == nil {

@@ -1,10 +1,14 @@
 package sub
 
 import (
+	"errors"
+	"net/http"
+
 	"github.com/felixbennettio/s-ui-next/logger"
 	"github.com/felixbennettio/s-ui-next/service"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type SubHandler struct {
@@ -24,6 +28,19 @@ func (s *SubHandler) initRouter(g *gin.RouterGroup) {
 	g.HEAD("/:subid", s.subHeaders)
 }
 
+// writeSubError answers an unknown or disabled subscription id with 404 and
+// a recognisable reason, and anything else with 400.
+func writeSubError(c *gin.Context, err error) {
+	if err != nil && errors.Is(err, gorm.ErrRecordNotFound) {
+		c.String(http.StatusNotFound, "subscription not found")
+		return
+	}
+	if err != nil {
+		logger.Error(err)
+	}
+	c.String(http.StatusBadRequest, "Error!")
+}
+
 func (s *SubHandler) subs(c *gin.Context) {
 	var headers []string
 	var result *string
@@ -36,39 +53,35 @@ func (s *SubHandler) subs(c *gin.Context) {
 			result, headers, err = s.JsonService.GetJson(subId, format)
 		case "clash":
 			result, headers, err = s.ClashService.GetClash(subId)
-		}
-		if err != nil || result == nil {
-			logger.Error(err)
-			c.String(400, "Error!")
+		default:
+			c.String(http.StatusBadRequest, "unsupported format")
 			return
 		}
 	} else {
 		result, headers, err = s.SubService.GetSubs(subId)
-		if err != nil || result == nil {
-			logger.Error(err)
-			c.String(400, "Error!")
-			return
-		}
+	}
+	if err != nil || result == nil {
+		writeSubError(c, err)
+		return
 	}
 
 	s.addHeaders(c, headers)
 
-	c.String(200, *result)
+	c.String(http.StatusOK, *result)
 }
 
 func (s *SubHandler) subHeaders(c *gin.Context) {
 	subId := c.Param("subid")
 	client, err := s.SubService.getClientBySubId(subId)
 	if err != nil {
-		logger.Error(err)
-		c.String(400, "Error!")
+		writeSubError(c, err)
 		return
 	}
 
 	headers := s.SubService.getClientHeaders(client)
 	s.addHeaders(c, headers)
 
-	c.Status(200)
+	c.Status(http.StatusOK)
 }
 
 func (s *SubHandler) addHeaders(c *gin.Context, headers []string) {

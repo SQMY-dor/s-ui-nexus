@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -71,3 +72,12 @@ func TestCheckLoginRedirectKeepsBasePath(t *testing.T) {
 	}
 }
 
+func TestFormatErrorMsgHasNoLeadingColon(t *testing.T) {
+	got := formatErrorMsg("", errors.New("wrong user or password (IP: 127.0.0.1)\n"))
+	if got != "wrong user or password (IP: 127.0.0.1)" {
+		t.Fatalf("got %q", got)
+	}
+	if got := formatErrorMsg("save", errors.New("bad")); got != "save: bad" {
+		t.Fatalf("got %q", got)
+	}
+}

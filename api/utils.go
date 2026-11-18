@@ -61,10 +61,21 @@ func jsonMsgObj(c *gin.Context, msg string, obj interface{}, err error) {
 		}
 	} else {
 		m.Success = false
-		m.Msg = msg + ": " + err.Error()
+		m.Msg = formatErrorMsg(msg, err)
 		logger.Warning("failed :", err)
 	}
 	c.JSON(http.StatusOK, m)
+}
+
+// formatErrorMsg joins an optional context prefix with the error text without
+// a dangling ": " when there is no prefix, and drops the trailing newline that
+// common.NewError (fmt.Sprintln) leaves behind.
+func formatErrorMsg(msg string, err error) string {
+	text := strings.TrimSpace(err.Error())
+	if msg == "" {
+		return text
+	}
+	return msg + ": " + text
 }
 
 func pureJsonMsg(c *gin.Context, success bool, msg string) {
