@@ -236,6 +236,7 @@ cd s-ui-next
 - Web 前端使用 Vue 和 TypeScript，位于 [`frontend`](https://github.com/SQMY-dor/s-ui-nexus-frontend) 子模块。
 - Flutter 移动端源码位于 `mobile/`。
 - 完整开发与贡献说明见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
+- 未登录访问面板会话接口（`<Web Path>api/…`，以及挂在会话鉴权上的 `apiv2/`、`apiv3/` 路径）时，一律返回 HTTP 401 `{"success":false,"msg":"Invalid login"}`，带 `X-Requested-With: XMLHttpRequest` 的面板请求也一样；Web 前端收到 401 后退出并跳转到登录页。其他页面路径重定向到 `<Web Path>login`。
 
 ### 从源码构建（Linux）
 

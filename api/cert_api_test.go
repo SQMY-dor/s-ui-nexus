@@ -4,6 +4,7 @@ package api
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
@@ -56,6 +57,9 @@ func TestCertEndpointsRequireLogin(t *testing.T) {
 		req := httptest.NewRequest(tc.method, tc.path, nil)
 		req.Header.Set("X-Requested-With", "XMLHttpRequest")
 		e.ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("%s %s without session: status %d, want 401", tc.method, tc.path, w.Code)
+		}
 		m := decodeMsg(t, w.Body.Bytes())
 		if m.Success || m.Msg != "Invalid login" {
 			t.Errorf("%s %s without session: %+v", tc.method, tc.path, m)

@@ -121,14 +121,12 @@ func loginRedirectPath() string {
 
 func checkLogin(c *gin.Context) {
 	if !IsLogin(c) {
-		switch {
-		case c.GetHeader("X-Requested-With") == "XMLHttpRequest":
-			// The Web panel's axios client checks for this exact 200 body and
-			// then logs out; keep it so the panel's login redirect still works.
-			pureJsonMsg(c, false, "Invalid login")
-		case isAPIRequestPath(c.Request.URL.Path):
+		if isAPIRequestPath(c.Request.URL.Path) {
+			// Every unauthenticated API call, panel XHR included, gets 401 with
+			// the JSON body the Web panel matches on; it then logs out and
+			// routes to its login page.
 			c.JSON(http.StatusUnauthorized, Msg{Success: false, Msg: "Invalid login"})
-		default:
+		} else {
 			c.Redirect(http.StatusTemporaryRedirect, loginRedirectPath())
 		}
 		c.Abort()

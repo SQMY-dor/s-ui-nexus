@@ -236,6 +236,7 @@ cd s-ui-next
 - Frontend: Vue and TypeScript in the [`frontend`](https://github.com/SQMY-dor/s-ui-nexus-frontend) submodule. Use `npm ci`, then `npm run build`.
 - Mobile: Flutter source lives in `mobile/`.
 - Full development and contribution instructions are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+- Unauthenticated calls to the panel session API (`<Web Path>api/…`, and any `apiv2/` or `apiv3/` path behind session auth) always get HTTP 401 `{"success":false,"msg":"Invalid login"}`, including panel requests sent with `X-Requested-With: XMLHttpRequest`. The Web frontend logs out and opens the login page on a 401. Other page paths redirect to `<Web Path>login`.
 
 ### Building from source (Linux)
 

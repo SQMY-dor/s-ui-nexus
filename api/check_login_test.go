@@ -24,39 +24,58 @@ func newCheckLoginRouter(t *testing.T) *gin.Engine {
 	router.Use(sessions.Sessions("s-ui-next", cookie.NewStore([]byte("test-secret-test-secret-1234567"))))
 	protected := func(c *gin.Context) { c.String(http.StatusOK, "ok") }
 	router.GET("/app/api/inbounds", checkLogin, protected)
+	router.GET("/app/apiv2/load", checkLogin, protected)
+	router.GET("/app/apiv3/bootstrap", checkLogin, protected)
 	router.GET("/app/other", checkLogin, protected)
 	return router
 }
 
 func TestCheckLoginAPIReturns401JSON(t *testing.T) {
 	router := newCheckLoginRouter(t)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/app/api/inbounds", nil))
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 (%s)", w.Code, w.Body.String())
-	}
-	var msg Msg
-	if err := json.Unmarshal(w.Body.Bytes(), &msg); err != nil {
-		t.Fatal(err)
-	}
-	if msg.Success || msg.Msg != "Invalid login" {
-		t.Fatalf("unexpected body %+v", msg)
+	for _, path := range []string{"/app/api/inbounds", "/app/apiv2/load", "/app/apiv3/bootstrap"} {
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("%s: status = %d, want 401 (%s)", path, w.Code, w.Body.String())
+		}
+		var msg Msg
+		if err := json.Unmarshal(w.Body.Bytes(), &msg); err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		if msg.Success || msg.Msg != "Invalid login" {
+			t.Fatalf("%s: unexpected body %+v", path, msg)
+		}
 	}
 }
 
-func TestCheckLoginXHRKeepsPanelContract(t *testing.T) {
+func TestCheckLoginXHRReturns401JSON(t *testing.T) {
 	router := newCheckLoginRouter(t)
-	req := httptest.NewRequest(http.MethodGet, "/app/api/inbounds", nil)
+	for _, path := range []string{"/app/api/inbounds", "/app/apiv2/load", "/app/apiv3/bootstrap"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("X-Requested-With", "XMLHttpRequest")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("%s: status = %d, want 401 (%s)", path, w.Code, w.Body.String())
+		}
+		var msg Msg
+		if err := json.Unmarshal(w.Body.Bytes(), &msg); err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		if msg.Success || msg.Msg != "Invalid login" {
+			t.Fatalf("%s: unexpected body %+v", path, msg)
+		}
+	}
+}
+
+func TestCheckLoginXHRNonAPIRedirects(t *testing.T) {
+	router := newCheckLoginRouter(t)
+	req := httptest.NewRequest(http.MethodGet, "/app/other", nil)
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-	var msg Msg
-	_ = json.Unmarshal(w.Body.Bytes(), &msg)
-	if msg.Success || msg.Msg != "Invalid login" {
-		t.Fatalf("unexpected body %+v", msg)
+	if w.Code != http.StatusTemporaryRedirect || w.Header().Get("Location") != "/app/login" {
+		t.Fatalf("status = %d Location = %q, want 307 /app/login", w.Code, w.Header().Get("Location"))
 	}
 }
 
