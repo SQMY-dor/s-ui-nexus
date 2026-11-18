@@ -179,6 +179,8 @@ docker run -d \
 
 Change the initial credentials and publish the panel through HTTPS before exposing it to an untrusted network. Ports, paths, and administrator credentials can be changed from the management menu or the Web panel.
 
+First login: use `admin` / `admin`. Passwords are stored as bcrypt hashes, so `sui admin -show` prints only the username and can not reveal the password. If you lose it, run `sui admin -password <new>` (changes only the password and keeps the username) or `sui admin -reset` to go back to `admin` / `admin`.
+
 ## Authentication Setup
 
 Authentication options are under **Settings → Login & identity** and **Admins → Login security**.

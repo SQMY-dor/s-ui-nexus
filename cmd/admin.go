@@ -52,13 +52,18 @@ func showAdmin() {
 	userModel, err := userService.GetFirstUser()
 	if err != nil {
 		fmt.Println("get current user info failed,error info:", err)
+		return
 	}
-	username := userModel.Username
-	userpasswd := userModel.Password
-	if (username == "") || (userpasswd == "") {
-		fmt.Println("current username or password is empty")
+	if userModel == nil {
+		return
 	}
 	fmt.Println("First admin credentials:")
-	fmt.Println("\tUsername:\t", username)
-	fmt.Println("\tPassword:\t", userpasswd)
+	fmt.Println("\tUsername:\t", userModel.Username)
+	if userModel.Password == "" {
+		fmt.Println("\tPassword:\t (empty)")
+	} else {
+		fmt.Println("\tPassword:\t (stored hashed; the original password can not be shown)")
+	}
+	fmt.Println("To regain access, set a new password with `sui admin -password <new>`")
+	fmt.Println("or reset the account to admin/admin with `sui admin -reset`.")
 }

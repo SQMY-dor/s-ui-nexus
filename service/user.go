@@ -68,16 +68,23 @@ func (s *UserService) GetFirstUser() (*model.User, error) {
 	return user, nil
 }
 
+// UpdateFirstUser changes the first administrator's credentials. An empty
+// username keeps the current username and an empty password keeps the
+// current password hash, so `sui admin -password X` rotates only the
+// password. Both values are required only when no administrator exists yet.
 func (s *UserService) UpdateFirstUser(username string, password string) error {
-	if username == "" {
-		return common.NewError("username can not be empty")
-	} else if password == "" {
-		return common.NewError("password can not be empty")
+	if username == "" && password == "" {
+		return common.NewError("username and password can not both be empty")
 	}
 	db := database.GetDB()
 	user := &model.User{}
 	err := db.Model(model.User{}).First(user).Error
 	if database.IsNotFound(err) {
+		if username == "" {
+			return common.NewError("username can not be empty")
+		} else if password == "" {
+			return common.NewError("password can not be empty")
+		}
 		hashed, hashErr := hashPassword(password)
 		if hashErr != nil {
 			return hashErr
@@ -88,12 +95,16 @@ func (s *UserService) UpdateFirstUser(username string, password string) error {
 	} else if err != nil {
 		return err
 	}
-	hashed, err := hashPassword(password)
-	if err != nil {
-		return err
+	if username != "" {
+		user.Username = username
 	}
-	user.Username = username
-	user.Password = hashed
+	if password != "" {
+		hashed, err := hashPassword(password)
+		if err != nil {
+			return err
+		}
+		user.Password = hashed
+	}
 	return db.Save(user).Error
 }
 
