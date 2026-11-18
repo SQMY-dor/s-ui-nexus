@@ -235,6 +235,14 @@ cd s-ui-next
 - Flutter 移动端源码位于 `mobile/`。
 - 完整开发与贡献说明见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 
+### 从源码构建（Linux）
+
+`./build.sh` 在常见的 glibc（Debian/Ubuntu）或 musl（Alpine）主机上构建，参数与 `Dockerfile` 一致：
+
+- 需要 Go（见 `go.mod`）、gcc（cgo）、Node.js/npm，以及 `curl` 或 `wget`。
+- 构建标签：`with_quic,with_grpc,with_utls,with_acme,with_gvisor,with_naive_outbound,with_purego,with_tailscale`，ldflags `-w -s`。
+- 脚本会按当前架构（amd64/arm64）下载 `libcronet.so` 到仓库根目录。naive 出站在运行时通过 purego 加载它，**`libcronet.so` 必须和 `sui` 放在同一目录**（例如一起复制到 `/usr/local/s-ui-next/`），否则 naive 出站会在运行时缺库。其他架构会自动去掉 naive 出站构建。
+
 ## 来源与许可证
 
 S-UI Next 基于 [alireza0/s-ui](https://github.com/alireza0/s-ui) 和 [SagerNet/sing-box](https://github.com/SagerNet/sing-box) 开发。Web 前端由 [felixbennettio/s-ui-next-frontend](https://github.com/felixbennettio/s-ui-next-frontend) 单独维护。

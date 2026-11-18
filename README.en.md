@@ -235,6 +235,14 @@ cd s-ui-next
 - Mobile: Flutter source lives in `mobile/`.
 - Full development and contribution instructions are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
+### Building from source (Linux)
+
+`./build.sh` builds on common glibc (Debian/Ubuntu) or musl (Alpine) hosts with the same settings as the `Dockerfile`:
+
+- Requires Go (see `go.mod`), gcc (cgo), Node.js/npm, and `curl` or `wget`.
+- Build tags: `with_quic,with_grpc,with_utls,with_acme,with_gvisor,with_naive_outbound,with_purego,with_tailscale`, ldflags `-w -s`.
+- The script downloads `libcronet.so` for the host architecture (amd64/arm64) into the repository root. The naive outbound loads it at runtime through purego, so **`libcronet.so` must sit in the same directory as `sui`** (for example, copy both to `/usr/local/s-ui-next/`). Other architectures are built without the naive outbound.
+
 ## Credits and License
 
 S-UI Next builds on [alireza0/s-ui](https://github.com/alireza0/s-ui) and [SagerNet/sing-box](https://github.com/SagerNet/sing-box). The Web frontend is maintained in [felixbennettio/s-ui-next-frontend](https://github.com/felixbennettio/s-ui-next-frontend).
