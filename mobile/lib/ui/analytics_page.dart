@@ -368,7 +368,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> with SingleTickerProvider
       subtitle: Text(
         [
           '${item['time'] ?? formatTimestamp(item['timestamp'])} · ${item['user']?.toString().isNotEmpty == true ? item['user'] : context.t('common.all')} · ${_connectionTarget(item)}',
-          if (meta != null) meta,
+          ?meta,
         ].join('\n'),
         maxLines: 3,
         overflow: TextOverflow.ellipsis,
@@ -410,7 +410,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> with SingleTickerProvider
         subtitle: Text(
           [
             '${item['time'] ?? formatTimestamp(item['timestamp'])} · ${item['source'] ?? 'system'}${item['user']?.toString().isNotEmpty == true ? ' · ${item['user']}' : ''}',
-            if (connectionMeta != null) connectionMeta,
+            ?connectionMeta,
           ].join('\n'),
           maxLines: 3,
           overflow: TextOverflow.ellipsis,

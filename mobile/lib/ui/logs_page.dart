@@ -141,7 +141,7 @@ class _LogsPageState extends State<LogsPage> {
         subtitle: Text(
           [
             '${item['time'] ?? formatTimestamp(item['timestamp'])} · ${item['source'] ?? 'system'}${item['user']?.toString().isNotEmpty == true ? ' · ${item['user']}' : ''}',
-            if (connectionMeta != null) connectionMeta,
+            ?connectionMeta,
           ].join('\n'),
           maxLines: 3,
           overflow: TextOverflow.ellipsis,
