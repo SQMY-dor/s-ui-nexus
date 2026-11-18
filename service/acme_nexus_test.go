@@ -239,8 +239,8 @@ func TestResolveMethod(t *testing.T) {
 	}{
 		{"auto", true, false, methodStandalone},
 		{"", true, true, methodStandalone}, // 80 free wins, as in 2s-ui
-		{"auto", false, true, methodNginx},  // nginx owns :80
-		{"auto", false, false, ""},          // something else owns :80
+		{"auto", false, true, methodNginx}, // nginx owns :80
+		{"auto", false, false, ""},         // something else owns :80
 		{"standalone", true, false, methodStandalone},
 		{"standalone", false, true, ""},
 		{"nginx", false, true, methodNginx},
