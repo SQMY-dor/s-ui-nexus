@@ -179,6 +179,8 @@ docker run -d \
 
 首次部署后请立即修改初始账号密码，并通过 HTTPS 对外提供管理面板。端口、路径和管理员凭据可以通过管理菜单或 Web 面板修改。
 
+首次登录：使用 `admin` / `admin`。密码在数据库中以 bcrypt 哈希保存，`sui admin -show` 只显示用户名，无法显示原密码。忘记密码时可执行 `sui admin -password <新密码>`（只改密码、保留用户名），或 `sui admin -reset` 重置为 `admin` / `admin`。
+
 ## 身份认证配置
 
 认证功能位于 **设置 → 登录与身份认证** 和 **管理员 → 登录安全**。
@@ -234,6 +236,15 @@ cd s-ui-next
 - Web 前端使用 Vue 和 TypeScript，位于 [`frontend`](https://github.com/SQMY-dor/s-ui-nexus-frontend) 子模块。
 - Flutter 移动端源码位于 `mobile/`。
 - 完整开发与贡献说明见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
+- 未登录访问面板会话接口（`<Web Path>api/…`，以及挂在会话鉴权上的 `apiv2/`、`apiv3/` 路径）时，一律返回 HTTP 401 `{"success":false,"msg":"Invalid login"}`，带 `X-Requested-With: XMLHttpRequest` 的面板请求也一样；Web 前端收到 401 后退出并跳转到登录页。其他页面路径重定向到 `<Web Path>login`。
+
+### 从源码构建（Linux）
+
+`./build.sh` 在常见的 glibc（Debian/Ubuntu）或 musl（Alpine）主机上构建，参数与 `Dockerfile` 一致：
+
+- 需要 Go（见 `go.mod`）、gcc（cgo）、Node.js/npm，以及 `curl` 或 `wget`。
+- 构建标签：`with_quic,with_grpc,with_utls,with_acme,with_gvisor,with_naive_outbound,with_purego,with_tailscale`，ldflags `-w -s`。
+- 脚本会按当前架构（amd64/arm64）下载 `libcronet.so` 到仓库根目录。naive 出站在运行时通过 purego 加载它，**`libcronet.so` 必须和 `sui` 放在同一目录**（例如一起复制到 `/usr/local/s-ui-next/`），否则 naive 出站会在运行时缺库。其他架构会自动去掉 naive 出站构建。
 
 ## 来源与许可证
 

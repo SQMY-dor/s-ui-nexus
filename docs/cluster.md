@@ -54,13 +54,19 @@
 ## 副本入站只读
 
 - 副本入站**不会进入本机 sing-box 配置**（`node_id IS NULL` 过滤），也不会参与本机路由引用、out_json 重写、本地链接生成。
+- 入站列表（`apiv2 GET inbounds`、api v3 `GET resources/inbounds`）和完整形状（`?id=`）中，副本带 `node_id`（节点 id），本地入站不含该键；副本不返回 `volume/up/down`（流量在节点上统计）。
 - 通过普通入站保存接口**编辑**或**新建**副本会被拒绝（请到节点面板上修改，reconcile 会把节点上的变化同步回来）。
 - 在入站列表**删除**副本 = 取消采纳：只删数据库记录，节点上的入站继续运行，下一次 reconcile 会删除推送过去的 `@cluster` 用户；用户上的 `[节点名] 标签` 链接会被立即移除。
 - **删除节点**会同时删除它的所有副本入站以及对应的订阅链接（节点上已推送的 `@cluster` 用户不会被远程删除，如需清理请在节点上处理）。
 
 ## 订阅合并
 
-- reconcile 时，主面板根据副本入站的 `out_json`/`addrs` 快照和用户凭据，在本地为每个用户生成节点链接，以 `external` 类型、备注 `[节点名] 入站标签` 合并进 `client.links`，订阅（普通 / JSON / Clash）自动包含这些链接。
+- reconcile 时，主面板根据副本入站的 `out_json`/`addrs` 快照和用户凭据，在本地为每个用户生成节点链接，以 `external` 类型、备注 `[节点名] 入站标签` 合并进 `client.links`。服务器地址取节点快照里的地址（与链接式订阅一致）。
+- 凭据取自主面板用户的 `config`：socks/http/mixed 副本按节点实际鉴权使用的条目生成（mixed 入站用 `config.mixed`，缺失时回退 `socks`/`http`，反之亦然），不会再生成 `socks5://:@…` 这种空凭据链接。已有的空凭据快照会在下一次 reconcile（保存该用户或节点、手动 `reconcileNode`，或每小时兜底）时被重写。
+- 三种订阅格式包含同一组节点：
+  - 普通（base64 链接）：直接输出本地链接 + `external` 链接；
+  - `?format=json`（sing-box）：本地入站按 `out_json` 生成 outbound（仍只取 `node_id IS NULL`，避免重复），节点副本通过上述 `external` 链接转换为 outbound，标签为链接备注 `[节点名] 入站标签`（多条时加序号前缀）；
+  - `?format=clash`：同 JSON，再转换为 Clash 代理。socks5:// / http(s):// 链接现在可以被转换（此前转换器不支持这两种协议，节点的 mixed/socks/http 副本因此被丢弃）。
 - 修改用户时，节点链接从数据库中保留（只要该副本仍绑定在用户上），不会被旧页面的表单覆盖。
 - 节点改名会把所有 `[旧名] ` 前缀改写为 `[新名] `。
 

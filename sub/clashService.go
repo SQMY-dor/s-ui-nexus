@@ -72,7 +72,7 @@ func (s *ClashService) GetClash(subId string) (*string, []string, error) {
 		return nil, nil, err
 	}
 
-	links := s.LinkService.GetLinks(&client.Links, "external", "")
+	links := s.LinkService.GetOutboundLinks(&client.Links)
 	tagNumEnable := 0
 	if len(links) > 1 {
 		tagNumEnable = 1

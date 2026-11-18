@@ -179,6 +179,8 @@ docker run -d \
 
 Change the initial credentials and publish the panel through HTTPS before exposing it to an untrusted network. Ports, paths, and administrator credentials can be changed from the management menu or the Web panel.
 
+First login: use `admin` / `admin`. Passwords are stored as bcrypt hashes, so `sui admin -show` prints only the username and can not reveal the password. If you lose it, run `sui admin -password <new>` (changes only the password and keeps the username) or `sui admin -reset` to go back to `admin` / `admin`.
+
 ## Authentication Setup
 
 Authentication options are under **Settings → Login & identity** and **Admins → Login security**.
@@ -234,6 +236,15 @@ cd s-ui-next
 - Frontend: Vue and TypeScript in the [`frontend`](https://github.com/SQMY-dor/s-ui-nexus-frontend) submodule. Use `npm ci`, then `npm run build`.
 - Mobile: Flutter source lives in `mobile/`.
 - Full development and contribution instructions are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+- Unauthenticated calls to the panel session API (`<Web Path>api/…`, and any `apiv2/` or `apiv3/` path behind session auth) always get HTTP 401 `{"success":false,"msg":"Invalid login"}`, including panel requests sent with `X-Requested-With: XMLHttpRequest`. The Web frontend logs out and opens the login page on a 401. Other page paths redirect to `<Web Path>login`.
+
+### Building from source (Linux)
+
+`./build.sh` builds on common glibc (Debian/Ubuntu) or musl (Alpine) hosts with the same settings as the `Dockerfile`:
+
+- Requires Go (see `go.mod`), gcc (cgo), Node.js/npm, and `curl` or `wget`.
+- Build tags: `with_quic,with_grpc,with_utls,with_acme,with_gvisor,with_naive_outbound,with_purego,with_tailscale`, ldflags `-w -s`.
+- The script downloads `libcronet.so` for the host architecture (amd64/arm64) into the repository root. The naive outbound loads it at runtime through purego, so **`libcronet.so` must sit in the same directory as `sui`** (for example, copy both to `/usr/local/s-ui-next/`). Other architectures are built without the naive outbound.
 
 ## Credits and License
 

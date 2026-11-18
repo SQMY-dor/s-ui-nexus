@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/felixbennettio/s-ui-next/logger"
+	"github.com/felixbennettio/s-ui-next/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -60,10 +61,21 @@ func jsonMsgObj(c *gin.Context, msg string, obj interface{}, err error) {
 		}
 	} else {
 		m.Success = false
-		m.Msg = msg + ": " + err.Error()
+		m.Msg = formatErrorMsg(msg, err)
 		logger.Warning("failed :", err)
 	}
 	c.JSON(http.StatusOK, m)
+}
+
+// formatErrorMsg joins an optional context prefix with the error text without
+// a dangling ": " when there is no prefix, and drops the trailing newline that
+// common.NewError (fmt.Sprintln) leaves behind.
+func formatErrorMsg(msg string, err error) string {
+	text := strings.TrimSpace(err.Error())
+	if msg == "" {
+		return text
+	}
+	return msg + ": " + text
 }
 
 func pureJsonMsg(c *gin.Context, success bool, msg string) {
@@ -80,12 +92,42 @@ func pureJsonMsg(c *gin.Context, success bool, msg string) {
 	}
 }
 
+// isAPIRequestPath reports whether path is one of the panel's JSON API
+// routes (<base>api/..., <base>apiv2/..., <base>apiv3/...).
+func isAPIRequestPath(path string) bool {
+	for _, segment := range strings.Split(path, "/") {
+		switch segment {
+		case "api", "apiv2", "apiv3":
+			return true
+		}
+	}
+	return false
+}
+
+// loginRedirectPath returns the panel login page under the configured web
+// path, e.g. /app/login, instead of a hard-coded /login that 404s when the
+// panel is not served from the root.
+func loginRedirectPath() string {
+	settingService := service.SettingService{}
+	basePath, err := settingService.GetWebPath()
+	if err != nil || basePath == "" {
+		basePath = "/"
+	}
+	if !strings.HasSuffix(basePath, "/") {
+		basePath += "/"
+	}
+	return basePath + "login"
+}
+
 func checkLogin(c *gin.Context) {
 	if !IsLogin(c) {
-		if c.GetHeader("X-Requested-With") == "XMLHttpRequest" {
-			pureJsonMsg(c, false, "Invalid login")
+		if isAPIRequestPath(c.Request.URL.Path) {
+			// Every unauthenticated API call, panel XHR included, gets 401 with
+			// the JSON body the Web panel matches on; it then logs out and
+			// routes to its login page.
+			c.JSON(http.StatusUnauthorized, Msg{Success: false, Msg: "Invalid login"})
 		} else {
-			c.Redirect(http.StatusTemporaryRedirect, "/login")
+			c.Redirect(http.StatusTemporaryRedirect, loginRedirectPath())
 		}
 		c.Abort()
 	} else {

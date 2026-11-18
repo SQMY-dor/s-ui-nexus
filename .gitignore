@@ -5,6 +5,7 @@ backup/
 bin/
 db/
 sui
+libcronet.so
 web/html
 main
 tmp

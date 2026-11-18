@@ -2,6 +2,7 @@ package sub
 
 import (
 	"encoding/json"
+	"net/url"
 	"strings"
 
 	"github.com/felixbennettio/s-ui-next/logger"
@@ -43,6 +44,47 @@ func (s *LinkService) GetLinks(linkJson *json.RawMessage, types string, clientIn
 		}
 	}
 	return result
+}
+
+// GetOutboundLinks is GetLinks(.., "external", "") for the JSON and Clash
+// formats, which turn each link into an outbound named after its fragment. A
+// stored external link without one -- the socks5:// and http:// links of a
+// cluster node's mixed/socks/http replica -- gets its remark ("[node] tag")
+// as the fragment so it converts into a named outbound instead of being
+// dropped, keeping the three formats aligned (issue #30).
+func (s *LinkService) GetOutboundLinks(linkJson *json.RawMessage) []string {
+	links := []Link{}
+	if linkJson == nil || json.Unmarshal(*linkJson, &links) != nil {
+		return nil
+	}
+	var result []string
+	for _, link := range links {
+		switch link.Type {
+		case "external":
+			result = append(result, withRemarkFragment(link.Uri, link.Remark))
+		case "sub":
+			subLinks := util.GetExternalLink(link.Uri)
+			for _, subLink := range strings.Split(subLinks, "\n") {
+				if subLink = strings.TrimSpace(subLink); subLink != "" {
+					result = append(result, subLink)
+				}
+			}
+		}
+	}
+	return result
+}
+
+func withRemarkFragment(uri string, remark string) string {
+	remark = strings.TrimSpace(remark)
+	if remark == "" || strings.HasPrefix(uri, "vmess://") {
+		return uri
+	}
+	u, err := url.Parse(uri)
+	if err != nil || u.Fragment != "" {
+		return uri
+	}
+	u.Fragment = remark
+	return u.String()
 }
 
 func (s *LinkService) addClientInfo(uri string, clientInfo string) string {

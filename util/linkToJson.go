@@ -33,9 +33,77 @@ func GetOutbound(uri string, i int) (*map[string]interface{}, string, error) {
 			return ss(u, i)
 		case "naive+https", "naive+quic", "http2":
 			return parseNaiveLink(u, i)
+		case "socks", "socks5", "socks5h":
+			return socksOrHttp(u, i, "socks")
+		case "http", "https":
+			return socksOrHttp(u, i, "http")
 		}
 	}
 	return nil, "", common.NewError("Unsupported link format")
+}
+
+// socksOrHttp reads the socks5:// and http(s):// share links the panel emits
+// for socks/http/mixed inbounds (socksLink/httpLink), including cluster node
+// links, into sing-box outbounds. Empty credentials are left out, so an
+// unauthenticated proxy stays unauthenticated. https means TLS.
+func socksOrHttp(u *url.URL, i int, protocol string) (*map[string]interface{}, string, error) {
+	host, portStr, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		host = u.Hostname()
+		portStr = u.Port()
+	}
+	if host == "" {
+		return nil, "", common.NewError("missing server in ", protocol, " link")
+	}
+	port := 1080
+	if protocol == "http" {
+		port = 80
+		if u.Scheme == "https" {
+			port = 443
+		}
+	}
+	if portStr != "" {
+		if parsed, convErr := strconv.Atoi(portStr); convErr == nil {
+			port = parsed
+		}
+	}
+	tag := u.Fragment
+	if tag == "" {
+		tag = fmt.Sprintf("%s-%s:%d", protocol, host, port)
+	}
+	if i > 0 {
+		tag = fmt.Sprintf("%d.%s", i, tag)
+	}
+	out := map[string]interface{}{
+		"type":        protocol,
+		"tag":         tag,
+		"server":      host,
+		"server_port": port,
+	}
+	if protocol == "socks" {
+		out["version"] = "5"
+	}
+	if u.User != nil {
+		if username := u.User.Username(); username != "" {
+			out["username"] = username
+		}
+		if password, ok := u.User.Password(); ok && password != "" {
+			out["password"] = password
+		}
+	}
+	if protocol == "http" && u.Scheme == "https" {
+		tls := map[string]interface{}{"enabled": true}
+		if sni := u.Query().Get("sni"); sni != "" {
+			tls["server_name"] = sni
+		} else if net.ParseIP(host) == nil {
+			tls["server_name"] = host
+		}
+		if u.Query().Get("allowInsecure") == "1" || u.Query().Get("insecure") == "1" {
+			tls["insecure"] = true
+		}
+		out["tls"] = tls
+	}
+	return &out, tag, nil
 }
 
 // GetOutboundForClash is GetOutbound for the Clash (mihomo) export of external

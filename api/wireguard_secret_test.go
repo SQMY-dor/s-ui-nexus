@@ -26,6 +26,9 @@ func TestWireGuardSecretRequiresSession(t *testing.T) {
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
 	var msg Msg
 	if err := json.Unmarshal(w.Body.Bytes(), &msg); err != nil {
 		t.Fatal(err)

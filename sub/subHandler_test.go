@@ -1,10 +1,15 @@
 package sub
 
 import (
+	"errors"
+	"fmt"
 	"net/http/httptest"
 	"testing"
 
+	projectLogger "github.com/felixbennettio/s-ui-next/logger"
 	"github.com/gin-gonic/gin"
+	"github.com/op/go-logging"
+	"gorm.io/gorm"
 )
 
 func TestAddSubscriptionHeadersHonorsShowInfo(t *testing.T) {
@@ -34,4 +39,21 @@ func TestAddSubscriptionHeadersAcceptsPartialValues(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(recorder)
 	addSubscriptionHeaders(context, nil, true)
+}
+
+func TestWriteSubErrorUnknownIsNotFound(t *testing.T) {
+	projectLogger.InitLogger(logging.ERROR)
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	writeSubError(context, fmt.Errorf("lookup: %w", gorm.ErrRecordNotFound))
+	if recorder.Code != 404 || recorder.Body.String() != "subscription not found" {
+		t.Fatalf("got %d %q", recorder.Code, recorder.Body.String())
+	}
+	recorder = httptest.NewRecorder()
+	context, _ = gin.CreateTestContext(recorder)
+	writeSubError(context, errors.New("boom"))
+	if recorder.Code != 400 {
+		t.Fatalf("got %d, want 400", recorder.Code)
+	}
 }
