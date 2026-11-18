@@ -38,6 +38,26 @@ func GetOutbound(uri string, i int) (*map[string]interface{}, string, error) {
 	return nil, "", common.NewError("Unsupported link format")
 }
 
+// GetOutboundForClash is GetOutbound for the Clash (mihomo) export of external
+// links. It additionally keeps a VLESS link's Xray "VLESS Encryption" string
+// (mlkem768x25519plus...), which mihomo speaks but sing-box has no field for
+// and would reject, so it rides only this path. "none" is the default and says
+// nothing. Upstream s-ui #1337, ported via shenaba/2s-ui (GPL-3.0).
+func GetOutboundForClash(uri string, i int) (*map[string]interface{}, string, error) {
+	outbound, tag, err := GetOutbound(uri, i)
+	if err != nil || outbound == nil {
+		return outbound, tag, err
+	}
+	u, perr := url.Parse(uri)
+	if perr != nil || u.Scheme != "vless" {
+		return outbound, tag, err
+	}
+	if encryption := strings.TrimSpace(u.Query().Get("encryption")); encryption != "" && encryption != "none" {
+		(*outbound)["encryption"] = encryption
+	}
+	return outbound, tag, err
+}
+
 func vmess(data string, i int) (*map[string]interface{}, string, error) {
 	dataByte, err := B64StrToByte(data)
 	if err != nil {
@@ -110,6 +130,12 @@ func vmess(data string, i int) (*map[string]interface{}, string, error) {
 			tls["utls"] = map[string]interface{}{
 				"enabled":     true,
 				"fingerprint": tls_fp,
+			}
+		}
+		// vmessLink writes it in the JSON body; read it back like the URI forms.
+		if tls_ech, _ := dataJson["ech"].(string); tls_ech != "" {
+			if ech := echFromLink(tls_ech); ech != nil {
+				tls["ech"] = ech
 			}
 		}
 	}
@@ -566,13 +592,11 @@ func getTls(security string, q *url.Values) map[string]interface{} {
 			"fingerprint": tls_fp,
 		}
 	}
-	if len(tls_ech) > 0 {
-		tls["ech"] = map[string]interface{}{
-			"enabled": true,
-			"config": []string{
-				tls_ech,
-			},
-		}
+	// The base64 ECHConfigList is wrapped back into the PEM block sing-box
+	// reads (stored raw it could not be decoded), and Xray's "domain+DNS"
+	// form becomes query_server_name.
+	if ech := echFromLink(tls_ech); ech != nil {
+		tls["ech"] = ech
 	}
 	if disable_sni == "1" || disable_sni == "true" {
 		tls["disable_sni"] = true

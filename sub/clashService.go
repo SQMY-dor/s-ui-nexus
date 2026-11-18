@@ -78,7 +78,9 @@ func (s *ClashService) GetClash(subId string) (*string, []string, error) {
 		tagNumEnable = 1
 	}
 	for index, link := range links {
-		json, tag, err := util.GetOutbound(link, (index+1)*tagNumEnable)
+		// The Clash-only reader keeps what mihomo speaks and sing-box does not
+		// (VLESS encryption).
+		json, tag, err := util.GetOutboundForClash(link, (index+1)*tagNumEnable)
 		if err == nil && len(tag) > 0 {
 			*outbounds = append(*outbounds, *json)
 			*outTags = append(*outTags, tag)
@@ -151,6 +153,10 @@ func (s *ClashService) ConvertToClashMeta(outbounds *[]map[string]interface{}, b
 			if t == "vless" {
 				if flow, ok := obMap["flow"].(string); ok {
 					proxy["flow"] = flow
+				}
+				// Only an external link carries this (util.GetOutboundForClash).
+				if encryption, ok := obMap["encryption"].(string); ok && encryption != "" {
+					proxy["encryption"] = encryption
 				}
 			}
 			if t == "tuic" {
@@ -261,19 +267,28 @@ func (s *ClashService) ConvertToClashMeta(outbounds *[]map[string]interface{}, b
 				proxy["skip-cert-verify"] = insecure
 			}
 			// ech outbounds
-			if ech, ok := tls["ech"].(map[string]interface{}); ok {
-				echEnabled, _ := ech["enabled"].(bool)
-				ech_config, configOK := ech["config"].([]interface{})
-				if echEnabled && configOK {
-					ech_string := ""
-					for i := 1; i < len(ech_config)-1; i++ {
-						if part, ok := ech_config[i].(string); ok {
-							ech_string += part
+			if ech, ok := tls["ech"].(map[string]interface{}); ok && util.AsBool(ech["enabled"]) {
+				if util.HasECHConfig(ech["config"]) {
+					// The PEM is decoded and its type checked (an ECH KEYS
+					// block must never reach a subscriber); a config that does
+					// not convert is left out whole, and ECHConfigBase64 has
+					// logged why. Slicing the stored lines positionally, as
+					// this used to, kept the END marker for a wrapped body or a
+					// trailing empty line.
+					if config := util.ECHConfigBase64(ech["config"]); config != "" {
+						proxy["ech-opts"] = map[string]interface{}{
+							"enable": true,
+							"config": config,
 						}
 					}
+				} else if name, _ := ech["query_server_name"].(string); strings.TrimSpace(name) != "" {
+					// No config, but a name to look it up under: the client
+					// asks that domain's DNS (HTTPS record) for it. With
+					// neither, ech-opts stays out and the node connects without
+					// ECH, which the server still accepts.
 					proxy["ech-opts"] = map[string]interface{}{
-						"enable": true,
-						"config": ech_string,
+						"enable":            true,
+						"query-server-name": strings.TrimSpace(name),
 					}
 				}
 			}
@@ -306,8 +321,16 @@ func (s *ClashService) ConvertToClashMeta(outbounds *[]map[string]interface{}, b
 				if path, ok := transport["path"].(string); ok {
 					wsOpts["path"] = path
 				}
-				if headers, ok := transport["headers"].([]interface{}); ok {
-					wsOpts["headers"] = headers
+				// Only the Host header is carried into Clash: the transport's
+				// own, else the SNI -- the same rule links and the JSON
+				// subscription follow. (headers is an object in sing-box; the
+				// old []interface{} check never matched, so no Host was sent.)
+				host := util.TransportHost(transport)
+				if host == "" {
+					host = util.DefaultTransportHost(transport, tls)
+				}
+				if host != "" {
+					wsOpts["headers"] = map[string]interface{}{"Host": host}
 				}
 				if ed, ok := transport["early_data_header_name"].(string); ok {
 					wsOpts["early-data-header-name"] = ed

@@ -238,6 +238,17 @@ func prepareTls(t *model.Tls) map[string]interface{} {
 				clientReality["short_id"] = shortIDs[common.RandomInt(len(shortIDs))]
 			}
 			oTls["reality"] = clientReality
+		case "ech":
+			// The client half carries no switch of its own: the server side's
+			// decides, as it does for the JSON subscription (addTls).
+			if ech, ok := v.(map[string]interface{}); ok && AsBool(ech["enabled"]) {
+				clientEch, _ := oTls["ech"].(map[string]interface{})
+				if clientEch == nil {
+					clientEch = map[string]interface{}{}
+				}
+				clientEch["enabled"] = true
+				oTls["ech"] = clientEch
+			}
 		}
 	}
 	return oTls
@@ -497,6 +508,9 @@ func vlessLink(
 			enabled, _ := tls["enabled"].(bool)
 			if enabled {
 				getTlsParams(&params, tls, "allowInsecure")
+				if host := DefaultTransportHost(inbound["transport"], tls); host != "" {
+					params = append(params, LinkParam{"host", host})
+				}
 				if flow, ok := userConfig["flow"].(string); ok {
 					params = append(params, LinkParam{"flow", flow})
 				}
@@ -525,6 +539,9 @@ func trojanLink(
 		if tls, ok := addr["tls"].(map[string]interface{}); ok {
 			if enabled, _ := tls["enabled"].(bool); enabled {
 				getTlsParams(&params, tls, "allowInsecure")
+				if host := DefaultTransportHost(inbound["transport"], tls); host != "" {
+					params = append(params, LinkParam{"host", host})
+				}
 			}
 		}
 		port, _ := addr["server_port"].(float64)
@@ -592,6 +609,11 @@ func vmessLink(
 			obj["path"] = path
 		}
 		populateVmessTlsParams(obj, addr["tls"])
+		if tls, ok := addr["tls"].(map[string]interface{}); ok {
+			if defaultHost := DefaultTransportHost(inbound["transport"], tls); defaultHost != "" {
+				obj["host"] = defaultHost
+			}
+		}
 
 		jsonStr, _ := json.Marshal(obj)
 
@@ -620,6 +642,8 @@ func populateVmessTlsParams(obj map[string]interface{}, tlsConfig interface{}) {
 				obj["fp"] = p.Value
 			case "alpn":
 				obj["alpn"] = p.Value
+			case "ech":
+				obj["ech"] = p.Value
 			}
 		}
 	} else {
@@ -676,17 +700,17 @@ func getTransportParams(t interface{}) []LinkParam {
 		if path, ok := trasport["path"].(string); ok {
 			params = append(params, LinkParam{"path", path})
 		}
-		if headers, ok := trasport["headers"].(map[string]interface{}); ok {
-			if host, ok := headers["Host"].(string); ok {
-				params = append(params, LinkParam{"host", host})
-			}
+		// The Host header is a Listable: a list one used to read as no Host,
+		// and an empty one is not emitted.
+		if host := TransportHost(trasport); host != "" {
+			params = append(params, LinkParam{"host", host})
 		}
 	case "grpc":
 		if serviceName, ok := trasport["service_name"].(string); ok {
 			params = append(params, LinkParam{"serviceName", serviceName})
 		}
 	case "httpupgrade":
-		if host, ok := trasport["host"].(string); ok {
+		if host := TransportHost(trasport); host != "" {
 			params = append(params, LinkParam{"host", host})
 		}
 		if path, ok := trasport["path"].(string); ok {
@@ -714,6 +738,13 @@ func getTlsParams(params *[]LinkParam, tls map[string]interface{}, insecureKey s
 		}
 		if disableSni, ok := tls["disable_sni"].(bool); ok && disableSni {
 			*params = append(*params, LinkParam{"disable_sni", "1"})
+		}
+		// Only a config travels: a link has no field for query_server_name,
+		// and a client given ech with nothing to use would refuse the node.
+		if ech, ok := tls["ech"].(map[string]interface{}); ok && AsBool(ech["enabled"]) {
+			if config := ECHConfigBase64(ech["config"]); config != "" {
+				*params = append(*params, LinkParam{"ech", config})
+			}
 		}
 	}
 	if utls, ok := tls["utls"].(map[string]interface{}); ok {
