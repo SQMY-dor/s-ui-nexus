@@ -17,6 +17,11 @@ func NewDepleteJob() *DepleteJob {
 }
 
 func (s *DepleteJob) Run() {
+	// Inbounds over their own traffic cap first, so the client pass below
+	// does not restart one that is about to go.
+	if _, err := s.InboundService.DepleteInbounds(); err != nil {
+		logger.Warning("Disable depleted inbounds failed: ", err)
+	}
 	inboundIds, changed, err := s.ClientService.DepleteClientsWithChange()
 	if err != nil {
 		logger.Warning("Disable depleted users failed: ", err)

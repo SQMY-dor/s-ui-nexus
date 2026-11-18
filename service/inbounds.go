@@ -61,6 +61,13 @@ func (s *InboundService) GetAll() (*[]map[string]interface{}, error) {
 			"enable": inbound.Enable,
 			"tls_id": inbound.TlsId,
 		}
+		// The traffic cap and the counters it is judged against; a replica's
+		// traffic is counted on its node.
+		if inbound.NodeId == nil {
+			inbData["volume"] = inbound.Volume
+			inbData["up"] = inbound.Up
+			inbData["down"] = inbound.Down
+		}
 		if inbound.NodeId != nil {
 			inbData["node_id"] = *inbound.NodeId
 		}
@@ -133,7 +140,8 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		oldRunning := false
 		if act == "edit" {
 			var old model.Inbound
-			err = tx.Model(model.Inbound{}).Select("tag", "node_id", "enable").Where("id = ?", inbound.Id).Find(&old).Error
+			err = tx.Model(model.Inbound{}).Select("tag", "node_id", "enable", "volume", "up", "down").
+				Where("id = ?", inbound.Id).Find(&old).Error
 			if err != nil {
 				return err
 			}
@@ -148,6 +156,10 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			// inbound back on.
 			if !inbound.EnableSet {
 				inbound.Enable = old.Enable
+			}
+			err = keepInboundCap(&inbound, &old)
+			if err != nil {
+				return err
 			}
 		}
 		err = checkInboundDetour(tx, &inbound, oldTag)
@@ -197,7 +209,8 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			return err
 		}
 
-		err = tx.Save(&inbound).Error
+		// The counters are the stats flush's alone (see model.Inbound).
+		err = tx.Omit("up", "down").Save(&inbound).Error
 		if err != nil {
 			return err
 		}
@@ -239,6 +252,8 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		if err != nil {
 			return err
 		}
+	case "resetTraffic":
+		return s.resetTraffic(tx, data, hostname)
 	default:
 		return common.NewErrorf("unknown action: %s", act)
 	}

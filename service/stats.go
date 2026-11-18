@@ -78,6 +78,9 @@ func (s *StatsService) SaveStats(enableTraffic bool) error {
 			}
 		}
 	}
+	if err := addInboundTraffic(tx, *stats); err != nil {
+		return err
+	}
 	if enableTraffic {
 		if err := tx.Create(&stats).Error; err != nil {
 			return err
@@ -171,4 +174,45 @@ func (s *StatsService) DelOldStats(days int) error {
 	oldTime := time.Now().AddDate(0, 0, -(days)).Unix()
 	db := database.GetDB()
 	return db.Where("date_time < ?", oldTime).Delete(model.Stats{}).Error
+}
+
+// addInboundTraffic advances the per-inbound counters the inbound traffic cap
+// is judged against (ported from shenaba/2s-ui #289): summed per tag and
+// direction, then one UPDATE each. By tag among the local inbounds only: a
+// replica never runs here, and a tag with no row (deleted since the drain)
+// updates nothing.
+func addInboundTraffic(tx *gorm.DB, stats []model.Stats) error {
+	type traffic struct{ up, down int64 }
+	inboundTraffic := map[string]*traffic{}
+	for _, stat := range stats {
+		if stat.Resource != "inbound" {
+			continue
+		}
+		t, ok := inboundTraffic[stat.Tag]
+		if !ok {
+			t = &traffic{}
+			inboundTraffic[stat.Tag] = t
+		}
+		if stat.Direction {
+			t.up += stat.Traffic
+		} else {
+			t.down += stat.Traffic
+		}
+	}
+	for tag, t := range inboundTraffic {
+		update := map[string]interface{}{}
+		if t.up > 0 {
+			update["up"] = gorm.Expr("up + ?", t.up)
+		}
+		if t.down > 0 {
+			update["down"] = gorm.Expr("down + ?", t.down)
+		}
+		if len(update) == 0 {
+			continue
+		}
+		if err := tx.Model(model.Inbound{}).Where("tag = ? AND node_id IS NULL", tag).UpdateColumns(update).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
